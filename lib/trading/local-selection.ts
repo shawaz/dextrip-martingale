@@ -102,6 +102,28 @@ async function recentAgentPerformanceBonus(agentId: string): Promise<number> {
   return clamp((wins - losses) * 2, -10, 10);
 }
 
+async function strategyLearningAdjustment(agentId: string, strategyId: string): Promise<number> {
+  const recentTrades = await db.query.trades.findMany({ where: eq(trades.agentId, agentId), orderBy: desc(trades.createdAt), limit: 12 });
+  const strategyTrades = recentTrades.filter((trade) => trade.strategyId === strategyId && trade.result !== "pending");
+  if (!strategyTrades.length) return 0;
+
+  const wins = strategyTrades.filter((trade) => trade.result === "won").length;
+  const losses = strategyTrades.filter((trade) => trade.result === "loss").length;
+  const totalPnl = strategyTrades.reduce((sum, trade) => sum + Number(trade.pnl ?? 0), 0);
+
+  return clamp((wins - losses) * 2 + totalPnl * 0.6, -12, 12);
+}
+
+async function noTradeDisciplinePenalty(agentId: string): Promise<number> {
+  const recentTrades = await db.query.trades.findMany({ where: eq(trades.agentId, agentId), orderBy: desc(trades.createdAt), limit: 6 });
+  const recentLosses = recentTrades.filter((trade) => trade.result === "loss").length;
+  const pendingHolds = recentTrades.filter((trade) => trade.signal === "HOLD").length;
+
+  if (recentLosses >= 4) return 8;
+  if (recentLosses >= 3 && pendingHolds === 0) return 5;
+  return 0;
+}
+
 async function recentStrategyPerformanceBonus(strategyId: string): Promise<number> {
   const recentTrades = await db.query.trades.findMany({ where: eq(trades.strategyId, strategyId), orderBy: desc(trades.createdAt), limit: 8 });
   if (!recentTrades.length) return 0;
@@ -171,10 +193,12 @@ export async function selectStrategyForAgent(agent: { id: string; preferredStrat
         marketFitBonus(strategy.name, marketState) +
         agentPreferenceBonus(strategy.name, agent.preferredStrategy ?? undefined, card.priority) +
         (await recentStrategyPerformanceBonus(strategy.id)) +
-        (await recentAgentPerformanceBonus(agent.id)) -
+        (await recentAgentPerformanceBonus(agent.id)) +
+        (await strategyLearningAdjustment(agent.id, strategy.id)) -
         volatilityMismatchPenalty(strategy.name, marketState) -
         regimePenalty(strategy.name, marketState) -
         (await losingStreakPenalty(agent.id)) -
+        (await noTradeDisciplinePenalty(agent.id)) -
         overtradePenalty(card.priority),
       0,
       100,
@@ -189,7 +213,7 @@ export async function selectStrategyForAgent(agent: { id: string; preferredStrat
       score: finalScore,
       confidence,
       signal,
-      report: `${strategy.report} Fit ${marketFitBonus(strategy.name, marketState).toFixed(0)}, regime ${marketState.regime}, trend ${marketState.trendDirection}, volatility ${marketState.volatilityLevel}.`,
+      report: `${strategy.report} Fit ${marketFitBonus(strategy.name, marketState).toFixed(0)}, regime ${marketState.regime}, trend ${marketState.trendDirection}, volatility ${marketState.volatilityLevel}, learned weight ${(await strategyLearningAdjustment(agent.id, strategy.id)).toFixed(0)}.`,
     });
   }
 
