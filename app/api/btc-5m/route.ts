@@ -2,7 +2,6 @@ import { NextResponse } from "next/server"
 import { db } from "@/db/client"
 import { agents, rounds, trades, settings, walletBalances } from "@/db/schema"
 import { eq, and, desc, lt } from "drizzle-orm"
-import { fetchPolymarketRoundTruth } from "@/lib/trading/polymarket"
 import { buildScaledLadder, replayStreakMachine } from "@/lib/trading/streak-machine"
 
 async function getTargetProfit() {
@@ -202,24 +201,21 @@ export async function GET(req: Request) {
     }
 
     const activeRound = await db().query.rounds.findFirst({ where: eq(rounds.startTime, startTimeIso) })
-    const liveTruth = await fetchPolymarketRoundTruth(startTimeIso, 5)
 
     const closedRounds = await db().select().from(rounds).where(and(eq(rounds.timeframe, "5m"), eq(rounds.status, "closed"))).orderBy(desc(rounds.startTime)).limit(30)
     const recentCloses = closedRounds
       .map((round) => Number(round.officialExitPrice ?? round.exitPrice ?? 0))
       .filter((value) => value > 0)
       .reverse()
-    const currentPrice = Number(liveTruth?.finalPrice ?? liveTruth?.priceToBeat ?? 0)
+    const currentPrice = 0
     const rsi = calculateRsi(currentPrice > 0 ? [...recentCloses, currentPrice] : recentCloses, 14)
 
     const recentDirections = closedRounds
       .map((round) => round.resolvedDirection)
       .filter((direction): direction is string => Boolean(direction))
-    const liveRecentDirs = liveTruth?.recentResults?.map((r: { direction: string }) => r.direction) ?? []
-    const allRecentDirs = [...liveRecentDirs, ...recentDirections]
-    const previousDirection = allRecentDirs[0] ?? null
-    const previousThreeUp = allRecentDirs.slice(0, 3).length === 3 && allRecentDirs.slice(0, 3).every((direction) => direction === "UP")
-    const previousThreeDown = allRecentDirs.slice(0, 3).length === 3 && allRecentDirs.slice(0, 3).every((direction) => direction === "DOWN")
+    const previousDirection = recentDirections[0] ?? null
+    const previousThreeUp = recentDirections.slice(0, 3).length === 3 && recentDirections.slice(0, 3).every((direction) => direction === "UP")
+    const previousThreeDown = recentDirections.slice(0, 3).length === 3 && recentDirections.slice(0, 3).every((direction) => direction === "DOWN")
 
     if (activeRound) {
       // No trade creation here — Railway bot is the sole executor
@@ -331,7 +327,7 @@ export async function GET(req: Request) {
       })
 
     return NextResponse.json({
-      live: liveTruth,
+      live: null,
       currentWindow: {
         roundId: activeRound?.roundId,
         startTime: startTimeIso,
@@ -339,9 +335,9 @@ export async function GET(req: Request) {
       },
       rows,
       recommendedTrades,
-      history: liveTruth?.recentResults || [],
-      recentResultsIcons: allRecentDirs.slice(0, 20).map(d => d === "UP" ? "↑" : "↓"),
-      debugRecentResults: liveTruth?.recentResults?.slice(0, 5).map(r => ({ direction: r.direction, startTime: r.startTime, closePrice: r.closePrice })),
+      history: [],
+      recentResultsIcons: recentDirections.slice(0, 20).map(d => d === "UP" ? "↑" : "↓"),
+      debugRecentResults: [],
       liveFocus,
       recentTrades: recentTrades.slice(0, 50).map((trade) => {
         const match = String(trade.roundId).match(/BTC5M-(\d+)/)
