@@ -176,28 +176,7 @@ export async function GET(req: Request) {
 
     const openRounds = await db().select().from(rounds).where(and(eq(rounds.timeframe, "5m"), eq(rounds.status, "open"), lt(rounds.startTime, startTimeIso)))
     for (const round of openRounds) {
-      const truth = await fetchPolymarketRoundTruth(round.startTime, 5)
-      if (!truth || !truth.resolvedDirection) continue
-
-      await db().update(rounds).set({
-        status: "closed",
-        officialEntryPrice: truth.priceToBeat ?? 0,
-        officialExitPrice: truth.finalPrice ?? truth.priceToBeat ?? 0,
-        resolvedDirection: truth.resolvedDirection,
-        updatedAt: new Date().toISOString(),
-      }).where(eq(rounds.id, round.id))
-
-      const roundTrades = await db().select().from(trades).where(eq(trades.roundId, round.roundId))
-      for (const trade of roundTrades) {
-        const won = trade.signal === truth.resolvedDirection
-        await db().update(trades).set({
-          exitPrice: truth.finalPrice ?? truth.priceToBeat ?? 0,
-          result: won ? "won" : "loss",
-          pnl: won ? Number(trade.targetProfitSnapshot ?? trade.stake ?? 0) : -Number(trade.stake ?? 0),
-          orderStatus: trade.tradeMode === "live" ? "settled" : trade.orderStatus,
-          updatedAt: new Date().toISOString(),
-        }).where(eq(trades.id, trade.id))
-      }
+      // Skip resolution - Railway handles fetching from Polymarket
     }
 
     const activeRound = await db().query.rounds.findFirst({ where: eq(rounds.startTime, startTimeIso) })
