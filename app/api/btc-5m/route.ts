@@ -5,8 +5,6 @@ import { eq, and, desc, lt } from "drizzle-orm"
 import { fetchPolymarketRoundTruth } from "@/lib/trading/polymarket"
 import { buildScaledLadder, replayStreakMachine } from "@/lib/trading/streak-machine"
 import crypto from "crypto"
-import { execFile } from "node:child_process"
-import { promisify } from "node:util"
 
 async function getTargetProfit() {
   try {
@@ -74,25 +72,40 @@ async function toggleLiveAgent(agentId: string, enabled: boolean) {
   const existing = await db.query.agents.findFirst({ where: eq(agents.id, agentId) })
   if (existing) {
     await db.update(agents).set({ isLive: enabled, updatedAt: now }).where(eq(agents.id, agentId))
+  } else {
+    await db.insert(agents).values({
+      id: agentId,
+      name: agentId.replace("_5M", "").replace(/_/g, " ").split(" ").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" "),
+      initials: agentId.replace("_5M", "").split("_").map((n: string) => n[0]).join(""),
+      color: agentId.includes("DOWN") ? "#ef4444" : "#10b981",
+      timeframe: "5m",
+      bankroll: 1000,
+      startingBankroll: 1000,
+      isLive: enabled,
+      createdAt: now,
+      updatedAt: now,
+    })
   }
-  await sqlite.execute(
-    `INSERT OR REPLACE INTO agents (id, name, initials, color, timeframe, bankroll, starting_bankroll, is_active, promoted, won, loss, win_rate, total_pnl, daily_pnl, max_drawdown, is_live, created_at, updated_at)
-     SELECT id, name, initials, color, timeframe, bankroll, starting_bankroll, is_active, promoted, won, loss, win_rate, total_pnl, daily_pnl, max_drawdown, ?, created_at, ?
-     FROM agents WHERE id = ?`,
-    [enabled ? 1 : 0, now, agentId]
-  ).catch(() => {})
+  try {
+    const colExists = await sqlite.execute("SELECT is_live FROM agents WHERE id = ? LIMIT 1", [agentId])
+    if (colExists.rows?.length === 0) {
+      await sqlite.execute(`ALTER TABLE agents ADD COLUMN is_live INTEGER NOT NULL DEFAULT ${enabled ? 1 : 0}`)
+    }
+  } catch {}
 }
-
-const execFileAsync = promisify(execFile)
 
 async function getWalletBalance() {
   try {
-    const { stdout } = await execFileAsync("python3.11", ["-c", `from py_clob_client.client import ClobClient\nfrom py_clob_client.clob_types import BalanceAllowanceParams, AssetType\nimport os, json\nkey=os.getenv(\"POLYMARKET_PRIVATE_KEY\")\nfunder=os.getenv(\"POLYMARKET_FUNDER\")\nif not key or not funder:\n    print(json.dumps({\"connected\": False, \"balance\": None}))\nelse:\n    temp=ClobClient(\"https://clob.polymarket.com\", key=key, chain_id=137, signature_type=2, funder=funder)\n    creds=temp.create_or_derive_api_creds()\n    client=ClobClient(\"https://clob.polymarket.com\", key=key, chain_id=137, creds=creds, signature_type=2, funder=funder)\n    res=client.get_balance_allowance(BalanceAllowanceParams(asset_type=AssetType.COLLATERAL))\n    raw=float(res.get(\"balance\", 0))\n    print(json.dumps({\"connected\": True, \"balance\": raw / 1_000_000}))`], {
-      env: process.env,
+    const key = process.env.POLYMARKET_PRIVATE_KEY
+    const funder = process.env.POLYMARKET_FUNDER
+    if (!key || !funder) return { connected: false, balance: null }
+    const res = await fetch("https://clob.polymarket.com/balances/collateral", {
+      headers: { "POLYMARKET_SIGNER_KEY": key }
     })
-    return JSON.parse(stdout.trim())
-  } catch (error) {
-    console.error("wallet balance error:", error)
+    if (!res.ok) return { connected: false, balance: null }
+    const data = await res.json()
+    return { connected: true, balance: data.balance ? data.balance / 1_000_000 : 0 }
+  } catch {
     return { connected: false, balance: null }
   }
 }
