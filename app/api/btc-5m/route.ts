@@ -4,7 +4,6 @@ import { agents, rounds, trades, settings, walletBalances } from "@/db/schema"
 import { eq, and, desc, lt } from "drizzle-orm"
 import { fetchPolymarketRoundTruth } from "@/lib/trading/polymarket"
 import { buildScaledLadder, replayStreakMachine } from "@/lib/trading/streak-machine"
-import crypto from "crypto"
 
 async function getTargetProfit() {
   try {
@@ -216,53 +215,14 @@ export async function GET(req: Request) {
     const recentDirections = closedRounds
       .map((round) => round.resolvedDirection)
       .filter((direction): direction is string => Boolean(direction))
-    const previousDirection = recentDirections[0] ?? liveTruth?.recentResults?.[0]?.direction ?? null
-    const previousThreeUp = recentDirections.slice(0, 3).length === 3 && recentDirections.slice(0, 3).every((direction) => direction === "UP")
-    const previousThreeDown = recentDirections.slice(0, 3).length === 3 && recentDirections.slice(0, 3).every((direction) => direction === "DOWN")
+    const liveRecentDirs = liveTruth?.recentResults?.map((r: { direction: string }) => r.direction) ?? []
+    const allRecentDirs = [...liveRecentDirs, ...recentDirections]
+    const previousDirection = allRecentDirs[0] ?? null
+    const previousThreeUp = allRecentDirs.slice(0, 3).length === 3 && allRecentDirs.slice(0, 3).every((direction) => direction === "UP")
+    const previousThreeDown = allRecentDirs.slice(0, 3).length === 3 && allRecentDirs.slice(0, 3).every((direction) => direction === "DOWN")
 
     if (activeRound) {
-      for (const streak of streakAgents) {
-        const existingTrade = await db().query.trades.findFirst({ where: and(eq(trades.agentId, streak.id), eq(trades.roundId, activeRound.roundId)) })
-        if (existingTrade) continue
-
-        let shouldTrade = streak.trigger === "always"
-        if (streak.trigger === "prev_up") shouldTrade = previousDirection === "UP"
-        if (streak.trigger === "prev_down") shouldTrade = previousDirection === "DOWN"
-        if (streak.trigger === "prev_three_up") shouldTrade = previousThreeUp
-        if (streak.trigger === "prev_three_down") shouldTrade = previousThreeDown
-        if (streak.trigger === "rsi_up") shouldTrade = rsi != null && rsi <= 30
-        if (streak.trigger === "rsi_down") shouldTrade = rsi != null && rsi >= 70
-        if (!shouldTrade) continue
-
-        const priorTrades = await db().select().from(trades).where(eq(trades.agentId, streak.id)).orderBy(desc(trades.createdAt))
-        const state = replayStreakMachine(
-          priorTrades
-            .filter((trade) => trade.roundId.startsWith("BTC5M-"))
-            .map((trade) => ({ stake: Number(trade.stake), result: trade.result as "won" | "loss" | "pending" | "skipped", targetProfit: Number(trade.targetProfitSnapshot ?? targetProfit) })),
-          ladder,
-          targetProfit,
-          1000,
-        )
-
-        const nextStep = state.currentStep > 0 ? state.currentStep : 1
-        const stake = ladder[Math.max(0, nextStep - 1)]
-
-        await db().insert(trades).values({
-          id: crypto.randomUUID(),
-          agentId: streak.id,
-          roundId: activeRound.roundId,
-          strategyId: "streak-5m",
-          signal: streak.direction,
-          stake,
-          entryPrice: liveTruth?.priceToBeat ?? 0,
-          result: "pending",
-          targetProfitSnapshot: targetProfit,
-          tradeMode: "paper",
-          orderStatus: "simulated",
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        })
-      }
+      // No trade creation here — Railway bot is the sole executor
     }
 
     const agentResults = await db().select().from(agents).where(eq(agents.timeframe, "5m"))
