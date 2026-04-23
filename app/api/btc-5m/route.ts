@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { db, sqlite } from "@/db/client"
+import { db } from "@/db/client"
 import { agents, rounds, trades, settings } from "@/db/schema"
 import { eq, and, desc, lt } from "drizzle-orm"
 import { fetchPolymarketRoundTruth } from "@/lib/trading/polymarket"
@@ -8,13 +8,7 @@ import crypto from "crypto"
 
 async function getTargetProfit() {
   try {
-    await sqlite.execute(`CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )`)
-
-    const setting = await db.query.settings.findFirst({ where: eq(settings.key, "martingale_target_profit") })
+    const setting = await db().query.settings.findFirst({ where: eq(settings.key, "martingale_target_profit") })
     return setting ? Number(setting.value) : 5
   } catch (error) {
     console.error("getTargetProfit error:", error);
@@ -50,9 +44,9 @@ const streakAgents = [
 async function seedAgents() {
   const now = new Date().toISOString()
   for (const a of streakAgents) {
-    const existing = await db.query.agents.findFirst({ where: eq(agents.id, a.id) })
+    const existing = await db().query.agents.findFirst({ where: eq(agents.id, a.id) })
     if (!existing) {
-      await db.insert(agents).values({
+      await db().insert(agents).values({
         id: a.id,
         name: a.name,
         initials: a.name.split(" ").map((n) => n[0]).join(""),
@@ -60,6 +54,15 @@ async function seedAgents() {
         timeframe: "5m",
         bankroll: 1000,
         startingBankroll: 1000,
+        isActive: 1,
+        isLive: 0,
+        promoted: 0,
+        won: 0,
+        loss: 0,
+        winRate: 0,
+        totalPnl: 0,
+        dailyPnl: 0,
+        maxDrawdown: 0,
         createdAt: now,
         updatedAt: now,
       })
@@ -69,11 +72,11 @@ async function seedAgents() {
 
 async function toggleLiveAgent(agentId: string, enabled: boolean) {
   const now = new Date().toISOString()
-  const existing = await db.query.agents.findFirst({ where: eq(agents.id, agentId) })
+  const existing = await db().query.agents.findFirst({ where: eq(agents.id, agentId) })
   if (existing) {
-    await db.update(agents).set({ isLive: enabled, updatedAt: now }).where(eq(agents.id, agentId))
+    await db().update(agents).set({ isLive: enabled ? 1 : 0, updatedAt: now }).where(eq(agents.id, agentId))
   } else {
-    await db.insert(agents).values({
+    await db().insert(agents).values({
       id: agentId,
       name: agentId.replace("_5M", "").replace(/_/g, " ").split(" ").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" "),
       initials: agentId.replace("_5M", "").split("_").map((n: string) => n[0]).join(""),
@@ -81,17 +84,11 @@ async function toggleLiveAgent(agentId: string, enabled: boolean) {
       timeframe: "5m",
       bankroll: 1000,
       startingBankroll: 1000,
-      isLive: enabled,
+      isLive: enabled ? 1 : 0,
       createdAt: now,
       updatedAt: now,
     })
   }
-  try {
-    const colExists = await sqlite.execute("SELECT is_live FROM agents WHERE id = ? LIMIT 1", [agentId])
-    if (colExists.rows?.length === 0) {
-      await sqlite.execute(`ALTER TABLE agents ADD COLUMN is_live INTEGER NOT NULL DEFAULT ${enabled ? 1 : 0}`)
-    }
-  } catch {}
 }
 
 async function getWalletBalance() {
@@ -119,12 +116,12 @@ export async function GET(req: Request) {
     const toggleEnabled = searchParams.get("liveEnabled") === "true"
 
     if (shouldReset) {
-      const existingAgents = await db.select().from(agents).where(eq(agents.timeframe, "5m"))
+      const existingAgents = await db().select().from(agents).where(eq(agents.timeframe, "5m"))
       for (const agent of existingAgents) {
-        await db.delete(trades).where(eq(trades.agentId, agent.id))
+        await db().delete(trades).where(eq(trades.agentId, agent.id))
       }
-      await db.delete(rounds).where(eq(rounds.timeframe, "5m"))
-      await db.delete(agents).where(eq(agents.timeframe, "5m"))
+      await db().delete(rounds).where(eq(rounds.timeframe, "5m"))
+      await db().delete(agents).where(eq(agents.timeframe, "5m"))
     }
 
     if (toggleAgent) {
@@ -134,7 +131,7 @@ export async function GET(req: Request) {
     if (newTarget) {
       const val = Number(newTarget)
       if (!Number.isNaN(val) && val > 0) {
-        await db.insert(settings).values({
+        await db().insert(settings).values({
           key: "martingale_target_profit",
           value: String(val),
           updatedAt: new Date().toISOString(),
@@ -143,26 +140,6 @@ export async function GET(req: Request) {
           set: { value: String(val), updatedAt: new Date().toISOString() },
         })
       }
-    }
-
-    await sqlite.execute(`ALTER TABLE trades ADD COLUMN trade_mode TEXT NOT NULL DEFAULT 'paper'`).catch(() => {})
-    await sqlite.execute(`ALTER TABLE trades ADD COLUMN external_order_id TEXT`).catch(() => {})
-    await sqlite.execute(`ALTER TABLE trades ADD COLUMN order_status TEXT NOT NULL DEFAULT 'idle'`).catch(() => {})
-    await sqlite.execute(`ALTER TABLE trades ADD COLUMN target_profit_snapshot REAL NOT NULL DEFAULT 5`).catch(() => {})
-
-    for (const colSql of [
-      `ALTER TABLE agents ADD COLUMN preferred_strategy TEXT`,
-      `ALTER TABLE agents ADD COLUMN promoted INTEGER NOT NULL DEFAULT 0`,
-      `ALTER TABLE agents ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1`,
-      `ALTER TABLE agents ADD COLUMN is_live INTEGER NOT NULL DEFAULT 0`,
-      `ALTER TABLE agents ADD COLUMN won INTEGER NOT NULL DEFAULT 0`,
-      `ALTER TABLE agents ADD COLUMN loss INTEGER NOT NULL DEFAULT 0`,
-      `ALTER TABLE agents ADD COLUMN win_rate REAL NOT NULL DEFAULT 0`,
-      `ALTER TABLE agents ADD COLUMN total_pnl REAL NOT NULL DEFAULT 0`,
-      `ALTER TABLE agents ADD COLUMN daily_pnl REAL NOT NULL DEFAULT 0`,
-      `ALTER TABLE agents ADD COLUMN max_drawdown REAL NOT NULL DEFAULT 0`,
-    ]) {
-      await sqlite.execute(colSql).catch(() => {})
     }
 
     const targetProfit = await getTargetProfit()
@@ -178,9 +155,9 @@ export async function GET(req: Request) {
     const startTimeIso = new Date(windowTs * 1000).toISOString()
     const endTimeIso = new Date((windowTs + intervalS) * 1000).toISOString()
 
-    const existingRound = await db.query.rounds.findFirst({ where: eq(rounds.startTime, startTimeIso) })
+    const existingRound = await db().query.rounds.findFirst({ where: eq(rounds.startTime, startTimeIso) })
     if (!existingRound) {
-      await db.insert(rounds).values({
+      await db().insert(rounds).values({
         id: crypto.randomUUID(),
         roundId: `BTC5M-${windowTs}`,
         asset: "BTC",
@@ -194,12 +171,12 @@ export async function GET(req: Request) {
       })
     }
 
-    const openRounds = await db.select().from(rounds).where(and(eq(rounds.timeframe, "5m"), eq(rounds.status, "open"), lt(rounds.startTime, startTimeIso)))
+    const openRounds = await db().select().from(rounds).where(and(eq(rounds.timeframe, "5m"), eq(rounds.status, "open"), lt(rounds.startTime, startTimeIso)))
     for (const round of openRounds) {
       const truth = await fetchPolymarketRoundTruth(round.startTime, 5)
       if (!truth || !truth.resolvedDirection) continue
 
-      await db.update(rounds).set({
+      await db().update(rounds).set({
         status: "closed",
         officialEntryPrice: truth.priceToBeat ?? 0,
         officialExitPrice: truth.finalPrice ?? truth.priceToBeat ?? 0,
@@ -207,10 +184,10 @@ export async function GET(req: Request) {
         updatedAt: new Date().toISOString(),
       }).where(eq(rounds.id, round.id))
 
-      const roundTrades = await db.select().from(trades).where(eq(trades.roundId, round.roundId))
+      const roundTrades = await db().select().from(trades).where(eq(trades.roundId, round.roundId))
       for (const trade of roundTrades) {
         const won = trade.signal === truth.resolvedDirection
-        await db.update(trades).set({
+        await db().update(trades).set({
           exitPrice: truth.finalPrice ?? truth.priceToBeat ?? 0,
           result: won ? "won" : "loss",
           pnl: won ? Number(trade.targetProfitSnapshot ?? trade.stake ?? 0) : -Number(trade.stake ?? 0),
@@ -220,10 +197,10 @@ export async function GET(req: Request) {
       }
     }
 
-    const activeRound = await db.query.rounds.findFirst({ where: eq(rounds.startTime, startTimeIso) })
+    const activeRound = await db().query.rounds.findFirst({ where: eq(rounds.startTime, startTimeIso) })
     const liveTruth = await fetchPolymarketRoundTruth(startTimeIso, 5)
 
-    const closedRounds = await db.select().from(rounds).where(and(eq(rounds.timeframe, "5m"), eq(rounds.status, "closed"))).orderBy(desc(rounds.startTime)).limit(30)
+    const closedRounds = await db().select().from(rounds).where(and(eq(rounds.timeframe, "5m"), eq(rounds.status, "closed"))).orderBy(desc(rounds.startTime)).limit(30)
     const recentCloses = closedRounds
       .map((round) => Number(round.officialExitPrice ?? round.exitPrice ?? 0))
       .filter((value) => value > 0)
@@ -240,7 +217,7 @@ export async function GET(req: Request) {
 
     if (activeRound) {
       for (const streak of streakAgents) {
-        const existingTrade = await db.query.trades.findFirst({ where: and(eq(trades.agentId, streak.id), eq(trades.roundId, activeRound.roundId)) })
+        const existingTrade = await db().query.trades.findFirst({ where: and(eq(trades.agentId, streak.id), eq(trades.roundId, activeRound.roundId)) })
         if (existingTrade) continue
 
         let shouldTrade = streak.trigger === "always"
@@ -252,7 +229,7 @@ export async function GET(req: Request) {
         if (streak.trigger === "rsi_down") shouldTrade = rsi != null && rsi >= 70
         if (!shouldTrade) continue
 
-        const priorTrades = await db.select().from(trades).where(eq(trades.agentId, streak.id)).orderBy(desc(trades.createdAt))
+        const priorTrades = await db().select().from(trades).where(eq(trades.agentId, streak.id)).orderBy(desc(trades.createdAt))
         const state = replayStreakMachine(
           priorTrades
             .filter((trade) => trade.roundId.startsWith("BTC5M-"))
@@ -265,7 +242,7 @@ export async function GET(req: Request) {
         const nextStep = state.currentStep > 0 ? state.currentStep : 1
         const stake = ladder[Math.max(0, nextStep - 1)]
 
-        await db.insert(trades).values({
+        await db().insert(trades).values({
           id: crypto.randomUUID(),
           agentId: streak.id,
           roundId: activeRound.roundId,
@@ -283,8 +260,8 @@ export async function GET(req: Request) {
       }
     }
 
-    const agentResults = await db.select().from(agents).where(eq(agents.timeframe, "5m"))
-    const recentTrades = await db.select().from(trades).where(and(eq(trades.strategyId, "streak-5m"))).orderBy(desc(trades.createdAt)).limit(100)
+    const agentResults = await db().select().from(agents).where(eq(agents.timeframe, "5m"))
+    const recentTrades = await db().select().from(trades).where(and(eq(trades.strategyId, "streak-5m"))).orderBy(desc(trades.createdAt)).limit(100)
     const liveTrades = recentTrades.filter((trade) => trade.tradeMode === "live")
     const paperTrades = recentTrades.filter((trade) => trade.tradeMode !== "live")
 

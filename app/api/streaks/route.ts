@@ -31,7 +31,7 @@ function buildStreakRow({ title, direction, trigger, currentStep }: { title: str
 }
 
 export async function GET() {
-  const roundRows = await db.select().from(rounds)
+  const roundRows = await db().select().from(rounds)
   const latestRound = [...roundRows].sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())[0]
   const liveTruth = latestRound ? await fetchPolymarketRoundTruth(latestRound.startTime) : null
   const priceToBeat = Number(liveTruth?.priceToBeat ?? latestRound?.officialEntryPrice ?? latestRound?.entryPrice ?? 0)

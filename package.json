@@ -11,6 +11,7 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@libsql/client": "^0.17.2",
+    "@neondatabase/serverless": "^1.1.0",
     "appwrite": "^24.2.0",
     "better-sqlite3": "^12.9.0",
     "class-variance-authority": "^0.7.1",

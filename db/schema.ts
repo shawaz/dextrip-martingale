@@ -1,15 +1,15 @@
-import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, real, pgTable, text } from "drizzle-orm/pg-core";
 
-export const agents = sqliteTable("agents", {
+export const agents = pgTable("agents", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   initials: text("initials").notNull(),
   color: text("color").notNull(),
   timeframe: text("timeframe").notNull(),
   preferredStrategy: text("preferred_strategy"),
-  promoted: integer("promoted", { mode: "boolean" }).notNull().default(false),
-  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
-  isLive: integer("is_live", { mode: "boolean" }).notNull().default(false),
+  promoted: integer("promoted").notNull().default(0),
+  isActive: integer("is_active").notNull().default(1),
+  isLive: integer("is_live").notNull().default(0),
   won: integer("won").notNull().default(0),
   loss: integer("loss").notNull().default(0),
   winRate: real("win_rate").notNull().default(0),
@@ -22,7 +22,7 @@ export const agents = sqliteTable("agents", {
   updatedAt: text("updated_at").notNull(),
 });
 
-export const strategies = sqliteTable("strategies", {
+export const strategies = pgTable("strategies", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   score: integer("score").notNull(),
@@ -34,21 +34,21 @@ export const strategies = sqliteTable("strategies", {
   updatedAt: text("updated_at").notNull(),
 });
 
-export const agentStrategyCards = sqliteTable("agent_strategy_cards", {
+export const agentStrategyCards = pgTable("agent_strategy_cards", {
   id: text("id").primaryKey(),
   agentId: text("agent_id").notNull(),
   strategyId: text("strategy_id").notNull(),
   priority: integer("priority").notNull().default(0),
 });
 
-export const rounds = sqliteTable("rounds", {
+export const rounds = pgTable("rounds", {
   id: text("id").primaryKey(),
   roundId: text("round_id").notNull(),
   asset: text("asset").notNull(),
   timeframe: text("timeframe").notNull(),
   startTime: text("start_time").notNull(),
   endTime: text("end_time").notNull(),
-  entryPrice: real("entry_price").notNull(),
+  entryPrice: real("entry_price").notNull().default(0),
   exitPrice: real("exit_price"),
   officialEntryPrice: real("official_entry_price"),
   officialExitPrice: real("official_exit_price"),
@@ -60,7 +60,7 @@ export const rounds = sqliteTable("rounds", {
   updatedAt: text("updated_at").notNull(),
 });
 
-export const trades = sqliteTable("trades", {
+export const trades = pgTable("trades", {
   id: text("id").primaryKey(),
   agentId: text("agent_id").notNull(),
   roundId: text("round_id").notNull(),
@@ -72,7 +72,7 @@ export const trades = sqliteTable("trades", {
   targetProfitSnapshot: real("target_profit_snapshot").notNull().default(5),
   pnl: real("pnl").notNull().default(0),
   report: text("report").notNull().default(""),
-  entryPrice: real("entry_price").notNull(),
+  entryPrice: real("entry_price").notNull().default(0),
   exitPrice: real("exit_price"),
   result: text("result").notNull(),
   tradeMode: text("trade_mode").notNull().default("paper"),
@@ -81,7 +81,7 @@ export const trades = sqliteTable("trades", {
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
-export const settings = sqliteTable("settings", {
+export const settings = pgTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
   updatedAt: text("updated_at").notNull(),

@@ -16,7 +16,7 @@ async function test() {
   ];
 
   try {
-    const agentResults = await db.select().from(agents);
+    const agentResults = await db().select().from(agents);
     console.log(`Found ${agentResults.length} agents in DB.`);
 
     const rows = streakAgents.map((streak) => {

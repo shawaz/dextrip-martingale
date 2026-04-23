@@ -95,7 +95,7 @@ function agentPreferenceBonus(strategyName: string, preferred?: string, priority
 }
 
 async function recentAgentPerformanceBonus(agentId: string): Promise<number> {
-  const recentTrades = await db.query.trades.findMany({ where: eq(trades.agentId, agentId), orderBy: desc(trades.createdAt), limit: 5 });
+  const recentTrades = await db().query.trades.findMany({ where: eq(trades.agentId, agentId), orderBy: desc(trades.createdAt), limit: 5 });
   if (!recentTrades.length) return 0;
   const wins = recentTrades.filter((trade) => trade.result === "won").length;
   const losses = recentTrades.filter((trade) => trade.result === "loss").length;
@@ -103,7 +103,7 @@ async function recentAgentPerformanceBonus(agentId: string): Promise<number> {
 }
 
 async function strategyLearningAdjustment(agentId: string, strategyId: string): Promise<number> {
-  const recentTrades = await db.query.trades.findMany({ where: eq(trades.agentId, agentId), orderBy: desc(trades.createdAt), limit: 12 });
+  const recentTrades = await db().query.trades.findMany({ where: eq(trades.agentId, agentId), orderBy: desc(trades.createdAt), limit: 12 });
   const strategyTrades = recentTrades.filter((trade) => trade.strategyId === strategyId && trade.result !== "pending");
   if (!strategyTrades.length) return 0;
 
@@ -115,7 +115,7 @@ async function strategyLearningAdjustment(agentId: string, strategyId: string): 
 }
 
 async function noTradeDisciplinePenalty(agentId: string): Promise<number> {
-  const recentTrades = await db.query.trades.findMany({ where: eq(trades.agentId, agentId), orderBy: desc(trades.createdAt), limit: 6 });
+  const recentTrades = await db().query.trades.findMany({ where: eq(trades.agentId, agentId), orderBy: desc(trades.createdAt), limit: 6 });
   const recentLosses = recentTrades.filter((trade) => trade.result === "loss").length;
   const pendingHolds = recentTrades.filter((trade) => trade.signal === "HOLD").length;
 
@@ -125,7 +125,7 @@ async function noTradeDisciplinePenalty(agentId: string): Promise<number> {
 }
 
 async function recentStrategyPerformanceBonus(strategyId: string): Promise<number> {
-  const recentTrades = await db.query.trades.findMany({ where: eq(trades.strategyId, strategyId), orderBy: desc(trades.createdAt), limit: 8 });
+  const recentTrades = await db().query.trades.findMany({ where: eq(trades.strategyId, strategyId), orderBy: desc(trades.createdAt), limit: 8 });
   if (!recentTrades.length) return 0;
   const wins = recentTrades.filter((trade) => trade.result === "won").length;
   const losses = recentTrades.filter((trade) => trade.result === "loss").length;
@@ -148,7 +148,7 @@ function regimePenalty(strategyName: string, marketState: MarketState): number {
 }
 
 async function losingStreakPenalty(agentId: string): Promise<number> {
-  const recentTrades = await db.query.trades.findMany({ where: eq(trades.agentId, agentId), orderBy: desc(trades.createdAt), limit: 3 });
+  const recentTrades = await db().query.trades.findMany({ where: eq(trades.agentId, agentId), orderBy: desc(trades.createdAt), limit: 3 });
   const losingStreak = recentTrades.filter((trade) => trade.result === "loss").length;
   return losingStreak >= 3 ? 8 : losingStreak === 2 ? 4 : 0;
 }
@@ -192,7 +192,7 @@ function participationPenalty(signal: "UP" | "DOWN" | "HOLD", marketState: Marke
 }
 
 async function strategistMentorAdjustment(strategyId: string, signal: "UP" | "DOWN" | "HOLD") {
-  const recentTrades = await db.query.trades.findMany({ orderBy: desc(trades.createdAt), limit: 80 });
+  const recentTrades = await db().query.trades.findMany({ orderBy: desc(trades.createdAt), limit: 80 });
   const strategyTrades = recentTrades.filter((trade) => trade.strategyId === strategyId && trade.signal !== "HOLD" && trade.result !== "pending" && trade.result !== "skipped");
   const wins = strategyTrades.filter((trade) => trade.result === "won").length;
   const losses = strategyTrades.filter((trade) => trade.result === "loss").length;
@@ -227,11 +227,11 @@ export async function selectStrategyForAgent(agent: { id: string; preferredStrat
   const pricePayload = (await priceResponse.json()) as { price?: string };
   const price = Number(pricePayload.price ?? 0);
   const marketState = await buildMarketState(price);
-  const cards = await db.select().from(agentStrategyCards).where(eq(agentStrategyCards.agentId, agent.id));
+  const cards = await db().select().from(agentStrategyCards).where(eq(agentStrategyCards.agentId, agent.id));
 
   const candidates = [] as Array<{ strategyId: string; strategyName: string; score: number; confidence: number; signal: "UP" | "DOWN" | "HOLD"; report: string }>;
   for (const card of cards) {
-    const strategy = await db.query.strategies.findFirst({ where: eq(strategies.id, card.strategyId) });
+    const strategy = await db().query.strategies.findFirst({ where: eq(strategies.id, card.strategyId) });
     if (!strategy) continue;
 
     const signal = signalForStrategy(strategy.name, marketState);
