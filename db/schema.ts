@@ -86,3 +86,9 @@ export const settings = pgTable("settings", {
   value: text("value").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
+
+export const walletBalances = pgTable("wallet_balances", {
+  id: integer("id").primaryKey(),
+  usdcBalance: real("usdc_balance").notNull().default(0),
+  updatedAt: text("updated_at").notNull(),
+});

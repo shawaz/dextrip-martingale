@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { db } from "@/db/client"
-import { agents, rounds, trades, settings } from "@/db/schema"
+import { agents, rounds, trades, settings, walletBalances } from "@/db/schema"
 import { eq, and, desc, lt } from "drizzle-orm"
 import { fetchPolymarketRoundTruth } from "@/lib/trading/polymarket"
 import { buildScaledLadder, replayStreakMachine } from "@/lib/trading/streak-machine"
@@ -144,6 +144,11 @@ export async function GET(req: Request) {
 
     const targetProfit = await getTargetProfit()
     const wallet = await getWalletBalance()
+    let dbBalance = 0
+    try {
+      const wb = await db().select().from(walletBalances).where(eq(walletBalances.id, 1)).limit(1)
+      if (wb[0]) dbBalance = Number(wb[0].usdcBalance ?? 0)
+    } catch {}
     const ladder = buildScaledLadder(targetProfit)
 
     await seedAgents()
@@ -395,7 +400,7 @@ export async function GET(req: Request) {
       liveHistory,
       wallet,
       liveSummary: {
-        balance: wallet?.balance ?? 0,
+        balance: dbBalance || wallet?.balance || 0,
         invested: liveTrades.filter((trade) => trade.result === "pending").reduce((sum, trade) => sum + Number(trade.stake ?? 0), 0),
         profits: liveTrades.reduce((sum, trade) => sum + Number(trade.pnl ?? 0), 0),
         returns: liveTrades.reduce((sum, trade) => sum + Number(trade.pnl ?? 0), 0),
