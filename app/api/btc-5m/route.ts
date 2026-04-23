@@ -341,6 +341,7 @@ export async function GET(req: Request) {
       recommendedTrades,
       history: liveTruth?.recentResults || [],
       recentResultsIcons: allRecentDirs.slice(0, 20).map(d => d === "UP" ? "↑" : "↓"),
+      debugRecentResults: liveTruth?.recentResults?.slice(0, 5).map(r => ({ direction: r.direction, startTime: r.startTime, closePrice: r.closePrice })),
       liveFocus,
       recentTrades: recentTrades.slice(0, 50).map((trade) => {
         const match = String(trade.roundId).match(/BTC5M-(\d+)/)
