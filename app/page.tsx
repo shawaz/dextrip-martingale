@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useEffect, useState } from "react"
-import { ArrowLeft, Loader2 } from "lucide-react"
+import { ArrowLeft, Loader2, CircleArrowUp, CircleArrowDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 type Row = {
@@ -214,17 +214,14 @@ export default function DextripMartingale() {
           )}
 
           {data?.recentResultsIcons && data.recentResultsIcons.length > 0 && (
-            <div className="flex items-center gap-1 p-3 rounded-xl border border-[#222222] bg-[#121212] overflow-x-auto">
+            <div className="flex items-center gap-2 p-4 rounded-xl border border-[#222222] bg-[#121212] overflow-x-auto">
+              <span className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest shrink-0 mr-1">History:</span>
               {data.recentResultsIcons.map((icon: string, i: number) => (
-                <span
-                  key={i}
-                  className={cn(
-                    "text-lg font-bold shrink-0",
-                    icon === "↑" ? "text-emerald-400" : "text-red-400"
-                  )}
-                >
-                  {icon}
-                </span>
+                icon === "↑" ? (
+                  <CircleArrowUp key={i} className="w-4 h-4 text-emerald-400 shrink-0" />
+                ) : (
+                  <CircleArrowDown key={i} className="w-4 h-4 text-red-400 shrink-0" />
+                )
               ))}
             </div>
           )}
