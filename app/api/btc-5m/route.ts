@@ -92,18 +92,18 @@ async function toggleLiveAgent(agentId: string, enabled: boolean) {
 }
 
 async function getWalletBalance() {
+  const key = process.env.POLYMARKET_PRIVATE_KEY
+  const funder = process.env.POLYMARKET_FUNDER
+  if (!key || !funder) return { connected: false, balance: null }
   try {
-    const key = process.env.POLYMARKET_PRIVATE_KEY
-    const funder = process.env.POLYMARKET_FUNDER
-    if (!key || !funder) return { connected: false, balance: null }
-    const res = await fetch("https://clob.polymarket.com/balances/collateral", {
-      headers: { "POLYMARKET_SIGNER_KEY": key }
+    const res = await fetch("https://clob.polymarket.com/balance-allowance?asset_type=0", {
+      headers: { "POLYMARKET-API-KEY": key }
     })
-    if (!res.ok) return { connected: false, balance: null }
+    if (!res.ok) return { connected: true, balance: null }
     const data = await res.json()
     return { connected: true, balance: data.balance ? data.balance / 1_000_000 : 0 }
   } catch {
-    return { connected: false, balance: null }
+    return { connected: true, balance: null }
   }
 }
 
