@@ -213,6 +213,22 @@ export default function DextripMartingale() {
             </div>
           )}
 
+          {data?.recentResultsIcons && data.recentResultsIcons.length > 0 && (
+            <div className="flex items-center gap-1 p-3 rounded-xl border border-[#222222] bg-[#121212] overflow-x-auto">
+              {data.recentResultsIcons.map((icon: string, i: number) => (
+                <span
+                  key={i}
+                  className={cn(
+                    "text-lg font-bold shrink-0",
+                    icon === "↑" ? "text-emerald-400" : "text-red-400"
+                  )}
+                >
+                  {icon}
+                </span>
+              ))}
+            </div>
+          )}
+
           <div className="overflow-hidden rounded-2xl border border-[#222222] bg-[#121212]">
             <table className="w-full text-left text-xs">
               <thead className="border-b border-[#222222] bg-[#1a1a1a]">

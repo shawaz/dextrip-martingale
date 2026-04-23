@@ -340,6 +340,7 @@ export async function GET(req: Request) {
       rows,
       recommendedTrades,
       history: liveTruth?.recentResults || [],
+      recentResultsIcons: allRecentDirs.slice(0, 20).map(d => d === "UP" ? "↑" : "↓"),
       liveFocus,
       recentTrades: recentTrades.slice(0, 50).map((trade) => {
         const match = String(trade.roundId).match(/BTC5M-(\d+)/)
