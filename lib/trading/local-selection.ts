@@ -176,6 +176,52 @@ function signalForStrategy(strategyName: string, marketState: MarketState): "UP"
   return marketState.trendDirection === "down" ? "DOWN" : "UP";
 }
 
+function confidenceLabel(confidence: number) {
+  if (confidence >= 0.82) return "High";
+  if (confidence >= 0.7) return "Medium";
+  return "Low";
+}
+
+function participationPenalty(signal: "UP" | "DOWN" | "HOLD", marketState: MarketState, score: number, confidence: number) {
+  if (signal === "HOLD") return 0;
+  let penalty = 0;
+  if (marketState.regime === "chaos") penalty += 10;
+  if (marketState.volatilityLevel === "high" && confidence < 0.78) penalty += 8;
+  if (marketState.trendDirection === "flat" && score < 78) penalty += 6;
+  return penalty;
+}
+
+async function strategistMentorAdjustment(strategyId: string, signal: "UP" | "DOWN" | "HOLD") {
+  const recentTrades = await db.query.trades.findMany({ orderBy: desc(trades.createdAt), limit: 80 });
+  const strategyTrades = recentTrades.filter((trade) => trade.strategyId === strategyId && trade.signal !== "HOLD" && trade.result !== "pending" && trade.result !== "skipped");
+  const wins = strategyTrades.filter((trade) => trade.result === "won").length;
+  const losses = strategyTrades.filter((trade) => trade.result === "loss").length;
+  const pnl = strategyTrades.reduce((sum, trade) => sum + Number(trade.pnl ?? 0), 0);
+  const crowding = recentTrades.filter((trade) => trade.signal === signal && trade.result === "pending").length;
+
+  let scoreDelta = 0;
+  let note = "Mentors see no major objection.";
+
+  if (losses > wins) {
+    scoreDelta -= 8;
+    note = "Mentors downgraded this setup because recent losses outweigh wins.";
+  }
+  if (pnl < 0) {
+    scoreDelta -= 6;
+    note = "Mentors downgraded this setup because recent strategy PnL is negative.";
+  }
+  if (crowding >= 3 && signal !== "HOLD") {
+    scoreDelta -= 7;
+    note = `Mentors flagged crowded ${signal} positioning and reduced conviction.`;
+  }
+  if (wins >= losses + 3 && pnl > 0) {
+    scoreDelta += 5;
+    note = "Mentors upgraded this setup because recent evidence is supportive.";
+  }
+
+  return { scoreDelta, note };
+}
+
 export async function selectStrategyForAgent(agent: { id: string; preferredStrategy?: string | null }) {
   const priceResponse = await fetch("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT");
   const pricePayload = (await priceResponse.json()) as { price?: string };
@@ -188,13 +234,17 @@ export async function selectStrategyForAgent(agent: { id: string; preferredStrat
     const strategy = await db.query.strategies.findFirst({ where: eq(strategies.id, card.strategyId) });
     if (!strategy) continue;
 
+    const signal = signalForStrategy(strategy.name, marketState);
+    const mentorAdjustment = await strategistMentorAdjustment(strategy.id, signal);
+
     const finalScore = clamp(
       strategy.score +
         marketFitBonus(strategy.name, marketState) +
         agentPreferenceBonus(strategy.name, agent.preferredStrategy ?? undefined, card.priority) +
         (await recentStrategyPerformanceBonus(strategy.id)) +
         (await recentAgentPerformanceBonus(agent.id)) +
-        (await strategyLearningAdjustment(agent.id, strategy.id)) -
+        (await strategyLearningAdjustment(agent.id, strategy.id)) +
+        mentorAdjustment.scoreDelta -
         volatilityMismatchPenalty(strategy.name, marketState) -
         regimePenalty(strategy.name, marketState) -
         (await losingStreakPenalty(agent.id)) -
@@ -203,29 +253,55 @@ export async function selectStrategyForAgent(agent: { id: string; preferredStrat
       0,
       100,
     );
-
-    const signal = signalForStrategy(strategy.name, marketState);
     const confidence = clamp(0.45 + finalScore / 200 + (marketState.breakout ? 0.05 : 0) - (signal === "HOLD" ? 0.08 : 0), 0.45, 0.95);
+    const strictScore = finalScore - participationPenalty(signal, marketState, finalScore, confidence);
 
     candidates.push({
       strategyId: strategy.id,
       strategyName: strategy.name,
-      score: finalScore,
+      score: strictScore,
       confidence,
       signal,
-      report: `${strategy.report} Fit ${marketFitBonus(strategy.name, marketState).toFixed(0)}, regime ${marketState.regime}, trend ${marketState.trendDirection}, volatility ${marketState.volatilityLevel}, learned weight ${(await strategyLearningAdjustment(agent.id, strategy.id)).toFixed(0)}.`,
+      report: `${strategy.report} Fit ${marketFitBonus(strategy.name, marketState).toFixed(0)}, regime ${marketState.regime}, trend ${marketState.trendDirection}, volatility ${marketState.volatilityLevel}, confidence ${confidenceLabel(confidence)}, learned weight ${(await strategyLearningAdjustment(agent.id, strategy.id)).toFixed(0)}. ${mentorAdjustment.note}`,
     });
   }
 
-  const top = candidates.sort((left, right) => right.score - left.score)[0];
-  if (!top || top.score < 68 || top.signal === "HOLD") {
+  const sorted = candidates.sort((left, right) => right.score - left.score);
+  const top = sorted[0];
+  const directional = sorted.filter((candidate) => candidate.signal !== "HOLD");
+  const upCount = directional.filter((candidate) => candidate.signal === "UP").length;
+  const downCount = directional.filter((candidate) => candidate.signal === "DOWN").length;
+  const dominantSignal = upCount >= downCount ? "UP" : "DOWN";
+  const imbalance = Math.abs(upCount - downCount);
+
+  if (!top || top.score < 76 || top.confidence < 0.68 || top.signal === "HOLD") {
     return {
       strategyId: candidates[0]?.strategyId ?? "",
       strategyName: candidates[0]?.strategyName ?? "No strategy",
       score: top?.score ?? 0,
       confidence: top?.confidence ?? 0.45,
       signal: "HOLD" as const,
-      report: `No strategy met the score threshold. Regime ${marketState.regime}, trend ${marketState.trendDirection}, volatility ${marketState.volatilityLevel}, top score ${top?.score ?? 0}.`,
+      report: `No strategy met the stricter participation threshold. Regime ${marketState.regime}, trend ${marketState.trendDirection}, volatility ${marketState.volatilityLevel}, top score ${top?.score ?? 0}, confidence ${confidenceLabel(top?.confidence ?? 0.45)}.`,
+      price,
+    };
+  }
+
+  if (imbalance >= 2 && top.signal === dominantSignal && sorted[1] && sorted[1].signal !== top.signal && sorted[1].score >= 74 && sorted[1].confidence >= 0.66) {
+    return {
+      ...sorted[1],
+      report: `${sorted[1].report} Diversified away from crowded ${dominantSignal} positioning.`,
+      price,
+    };
+  }
+
+  if (top.confidence < 0.72 && marketState.regime !== "breakout") {
+    return {
+      strategyId: top.strategyId,
+      strategyName: top.strategyName,
+      score: top.score,
+      confidence: top.confidence,
+      signal: "HOLD" as const,
+      report: `Confidence ${confidenceLabel(top.confidence)} was not strong enough for participation in ${marketState.regime} regime.`,
       price,
     };
   }
