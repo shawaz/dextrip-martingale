@@ -45,20 +45,17 @@ export default function DextripMartingale() {
       setLoading(false)
     }
     fetchData()
-    const interval = setInterval(fetchData, 30000)
+    const interval = setInterval(fetchData, 5000)
     return () => clearInterval(interval)
   }, [])
 
   useEffect(() => {
     const updateTimer = () => {
       const now = new Date()
-      const etOffset = -4 * 60 * 60 * 1000
-      const etNow = new Date(now.getTime() + etOffset)
-      const etMinutes = etNow.getUTCHours() * 60 + etNow.getUTCMinutes()
-      const etSeconds = etNow.getUTCSeconds() + etNow.getUTCMilliseconds() / 1000
-      const secondsSinceMidnight = etMinutes * 60 + etSeconds
-      const windowSeconds = Math.floor(secondsSinceMidnight / 300) * 300 + 300
-      const diff = (windowSeconds - secondsSinceMidnight) * 1000
+      const etTime = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }))
+      const etSeconds = etTime.getHours() * 3600 + etTime.getMinutes() * 60 + etTime.getSeconds() + etTime.getMilliseconds() / 1000
+      const windowSeconds = Math.floor(etSeconds / 300) * 300 + 300
+      const diff = (windowSeconds - etSeconds) * 1000
       const mins = Math.floor(diff / 60000)
       const secs = Math.floor((diff % 60000) / 1000)
       setTimeLeft(`${mins}:${secs.toString().padStart(2, "0")}`)
@@ -90,11 +87,11 @@ export default function DextripMartingale() {
           <div className="p-6 md:p-8 space-y-8">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
               <div className="space-y-1">
-                <h1 className="text-xl md:text-2xl font-bold tracking-tight text-white">BTC-5M</h1>
+<h1 className="text-xl md:text-2xl font-bold tracking-tight text-white">BTC-5M</h1>
                 {data?.currentWindow && (
-                  <p className="text-zinc-500 font-medium text-sm">
-                    {new Date(data.currentWindow.startTime).toLocaleDateString("en-US", { month: "long", day: "numeric" })}, {new Date(data.currentWindow.startTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })} - {new Date(data.currentWindow.endTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}
-                  </p>
+                  <span className="text-sm text-zinc-400">
+                    {new Date(data.currentWindow.startTime).toLocaleDateString("en-US", { timeZone: "America/New_York", month: "long", day: "numeric" })}, {new Date(data.currentWindow.startTime).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true })} - {new Date(data.currentWindow.endTime).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true })}
+                  </span>
                 )}
               </div>
 
@@ -409,7 +406,9 @@ export default function DextripMartingale() {
                       <td className="px-4 py-4 text-zinc-300">{trade.windowLabel ?? trade.roundId}</td>
                       <td className="px-4 py-4 text-zinc-300">{trade.signal}</td>
                       <td className="px-4 py-4 font-mono text-zinc-300">${Number(trade.stake ?? 0).toFixed(2)}</td>
-                      <td className="px-4 py-4 text-emerald-400">{trade.orderStatus ?? trade.result}</td>
+                      <td className={cn("px-4 py-4 font-semibold", trade.result === "won" ? "text-emerald-400" : trade.result === "loss" ? "text-red-400" : "text-amber-400")}>
+                        {trade.result === "won" ? "WIN" : trade.result === "loss" ? "LOSS" : "PENDING"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
