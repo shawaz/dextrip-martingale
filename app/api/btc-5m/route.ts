@@ -300,7 +300,7 @@ export async function GET(req: Request) {
         const start = match ? new Date(Number(match[1]) * 1000) : null
         const end = start ? new Date(start.getTime() + 5 * 60 * 1000) : null
         const windowLabel = start && end
-          ? `${start.toLocaleDateString("en-US", { month: "long", day: "numeric" })}, ${start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })} - ${end.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}`
+          ? `${start.toLocaleDateString("en-US", { month: "long", day: "numeric" })}, ${start.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true })} - ${end.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true })}`
           : trade.roundId
         return { ...trade, windowLabel }
       })
@@ -323,7 +323,7 @@ export async function GET(req: Request) {
         const start = match ? new Date(Number(match[1]) * 1000) : null
         const end = start ? new Date(start.getTime() + 5 * 60 * 1000) : null
         const windowLabel = start && end
-          ? `${start.toLocaleDateString("en-US", { month: "long", day: "numeric" })}, ${start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })} - ${end.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}`
+          ? `${start.toLocaleDateString("en-US", { month: "long", day: "numeric" })}, ${start.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true })} - ${end.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true })}`
           : trade.roundId
         const ladderIndex = ladder.indexOf(Number(trade.stake))
         const ladderStage = ladderIndex >= 0 ? ladderIndex + 1 : null

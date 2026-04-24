@@ -51,9 +51,14 @@ export default function DextripMartingale() {
 
   useEffect(() => {
     const updateTimer = () => {
-      const ms = Date.now()
-      const nextWindow = Math.ceil(ms / 300000) * 300000
-      const diff = nextWindow - ms
+      const now = new Date()
+      const etOffset = -4 * 60 * 60 * 1000
+      const etNow = new Date(now.getTime() + etOffset)
+      const etMinutes = etNow.getUTCHours() * 60 + etNow.getUTCMinutes()
+      const etSeconds = etNow.getUTCSeconds() + etNow.getUTCMilliseconds() / 1000
+      const secondsSinceMidnight = etMinutes * 60 + etSeconds
+      const windowSeconds = Math.floor(secondsSinceMidnight / 300) * 300 + 300
+      const diff = (windowSeconds - secondsSinceMidnight) * 1000
       const mins = Math.floor(diff / 60000)
       const secs = Math.floor((diff % 60000) / 1000)
       setTimeLeft(`${mins}:${secs.toString().padStart(2, "0")}`)
