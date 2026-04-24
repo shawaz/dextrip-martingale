@@ -28,6 +28,7 @@ type Row = {
 export default function DextripMartingale() {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [sseConnected, setSseConnected] = useState(false)
   const [timeLeft, setTimeLeft] = useState("0:00")
   const [targetValue, setTargetValue] = useState("5")
   const [tradeFilter, setTradeFilter] = useState("")
@@ -37,6 +38,35 @@ export default function DextripMartingale() {
   const [activeTab, setActiveTab] = useState<"live" | "paper">("live")
 
   useEffect(() => {
+    let isMounted = true
+    
+    const connectSSE = async () => {
+      try {
+        const eventSource = new EventSource("/api/btc-5m/stream")
+        
+        eventSource.onmessage = (event) => {
+          if (!isMounted) return
+          try {
+            const msg = JSON.parse(event.data)
+            if (msg.type === "update" && msg.data) {
+              setData((prev: any) => ({ ...prev, ...msg.data }))
+            } else if (msg.type === "ping" || msg.type === "connected") {
+              fetchData()
+            }
+          } catch {}
+        }
+        
+        eventSource.onerror = () => {
+          eventSource.close()
+          setTimeout(() => {
+            if (isMounted) connectSSE()
+          }, 5000)
+        }
+        
+        setSseConnected(true)
+      } catch {}
+    }
+    
     const fetchData = async () => {
       const res = await fetch("/api/btc-5m")
       const json = await res.json()
@@ -44,9 +74,13 @@ export default function DextripMartingale() {
       if (json?.targetProfit) setTargetValue(String(json.targetProfit))
       setLoading(false)
     }
+    
     fetchData()
-    const interval = setInterval(fetchData, 5000)
-    return () => clearInterval(interval)
+    connectSSE()
+    
+    return () => {
+      isMounted = false
+    }
   }, [])
 
   useEffect(() => {
