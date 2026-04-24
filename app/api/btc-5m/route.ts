@@ -35,6 +35,8 @@ const streakAgents = [
   { id: "PREVIOUS_DOWN_5M", name: "Previous DOWN", direction: "DOWN", trigger: "prev_down" },
   { id: "PREVIOUS_THREE_UP_5M", name: "Previous 3 UP", direction: "DOWN", trigger: "prev_three_up" },
   { id: "PREVIOUS_THREE_DOWN_5M", name: "Previous 3 DOWN", direction: "UP", trigger: "prev_three_down" },
+  { id: "PREVIOUS_FIVE_UP_5M", name: "Previous 5 UP", direction: "DOWN", trigger: "prev_five_up" },
+  { id: "PREVIOUS_FIVE_DOWN_5M", name: "Previous 5 DOWN", direction: "UP", trigger: "prev_five_down" },
   { id: "RSI_UP_5M", name: "RSI UP", direction: "UP", trigger: "rsi_up" },
   { id: "RSI_DOWN_5M", name: "RSI DOWN", direction: "DOWN", trigger: "rsi_down" },
 ]
