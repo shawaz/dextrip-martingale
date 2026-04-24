@@ -408,7 +408,9 @@ export default function DextripMartingale() {
                       <td className="px-4 py-4 font-mono text-zinc-300">${Number(trade.stake ?? 0).toFixed(2)}</td>
                       <td className="px-4 py-4 text-zinc-300">{trade.closedStage ? `Closed ${trade.closedStage}` : trade.ladderStage ? `Stage ${trade.ladderStage}` : "--"}</td>
                       <td className="px-4 py-4 font-mono text-emerald-400">${Number(trade.tradeProfit ?? 0).toFixed(2)}</td>
-                      <td className="px-4 py-4 text-zinc-300">{trade.result}</td>
+                      <td className={cn("px-4 py-4 font-semibold", trade.result === "won" ? "text-emerald-400" : trade.result === "loss" ? "text-red-400" : "text-amber-400")}>
+                        {trade.result === "won" ? "WIN" : trade.result === "loss" ? "LOSS" : trade.orderStatus === "settled" ? "SETTLED" : "PENDING"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
