@@ -29,8 +29,7 @@ function calculateRsi(closes: number[], period = 14): number | null {
 }
 
 const streakAgents = [
-  { id: "EVERY_UP_5M", name: "Every UP", direction: "UP", trigger: "always" },
-  { id: "EVERY_DOWN_5M", name: "Every DOWN", direction: "DOWN", trigger: "always" },
+  { id: "EVERY_5M", name: "Every", direction: "BOTH", trigger: "always" },
   { id: "PREVIOUS_UP_5M", name: "Previous UP", direction: "UP", trigger: "prev_up" },
   { id: "PREVIOUS_DOWN_5M", name: "Previous DOWN", direction: "DOWN", trigger: "prev_down" },
   { id: "PREVIOUS_THREE_UP_5M", name: "Previous 3 UP", direction: "DOWN", trigger: "prev_three_up" },
@@ -50,7 +49,7 @@ async function seedAgents() {
         id: a.id,
         name: a.name,
         initials: a.name.split(" ").map((n) => n[0]).join(""),
-        color: a.direction === "UP" ? "#10b981" : "#ef4444",
+        color: a.direction === "BOTH" ? "#3b82f6" : a.direction === "UP" ? "#10b981" : "#ef4444",
         timeframe: "5m",
         bankroll: 1000,
         startingBankroll: 1000,
@@ -256,6 +255,8 @@ export async function GET(req: Request) {
         streak.trigger === "prev_down" ? previousDirection === "DOWN" :
         streak.trigger === "prev_three_up" ? previousThreeUp :
         streak.trigger === "prev_three_down" ? previousThreeDown :
+        streak.trigger === "prev_five_up" ? (recentDirections.slice(0, 5).length === 5 && recentDirections.slice(0, 5).every((d) => d === "UP")) :
+        streak.trigger === "prev_five_down" ? (recentDirections.slice(0, 5).length === 5 && recentDirections.slice(0, 5).every((d) => d === "DOWN")) :
         streak.trigger === "rsi_up" ? rsi != null && rsi <= 30 :
         streak.trigger === "rsi_down" ? rsi != null && rsi >= 70 : false
 
