@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
-import { db } from "@/db/client"
-import { rounds } from "@/db/schema"
+import { db, rounds } from "@/db/index"
 import { fetchPolymarketRoundTruth } from "@/lib/trading/polymarket"
 
 function buildStreakRow({ title, direction, trigger, currentStep }: { title: string; direction: "UP" | "DOWN"; trigger: string; currentStep: number }) {

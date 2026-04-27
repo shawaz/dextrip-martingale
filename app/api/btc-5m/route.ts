@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
-import { db } from "@/db/client"
-import { agents, rounds, trades, settings, walletBalances } from "@/db/schema"
+import { db, agents, rounds, trades, settings, walletBalances } from "@/db/index"
 import { eq, and, desc, lt } from "drizzle-orm"
 import { buildScaledLadder, replayStreakMachine } from "@/lib/trading/streak-machine"
 
@@ -258,7 +257,7 @@ export async function GET(req: Request) {
         streak.trigger === "prev_five_up" ? (recentDirections.slice(0, 5).length === 5 && recentDirections.slice(0, 5).every((d) => d === "UP")) :
         streak.trigger === "prev_five_down" ? (recentDirections.slice(0, 5).length === 5 && recentDirections.slice(0, 5).every((d) => d === "DOWN")) :
         streak.trigger === "rsi_up" ? rsi != null && rsi <= 30 :
-        streak.trigger === "rsi_down" ? rsi != null && rsi >= 70 : false
+        streak.trigger === "rsi_down" ? rsi != null && rsi >= 80 : false
 
       const isLive = agent?.isLive ?? false
       return {

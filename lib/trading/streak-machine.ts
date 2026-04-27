@@ -1,16 +1,8 @@
-export const DEFAULT_STREAK_LADDER = [5, 12, 27, 59, 130]
+export const DEFAULT_STREAK_LADDER = [1, 3, 9, 27]  // 3x martingale ladder
 
-export type StreakMachineState = {
-  roundsCompleted: number
-  successfulCycles: number
-  failedCycles: number
-  currentStep: number
-  previousStep: number
-  investedOpen: number
-  realizedProfit: number
-  realizedLoss: number
-  totalCapital: number
-  status: "idle" | "active" | "broken"
+export function buildScaledLadder(targetProfit: number, base = DEFAULT_STREAK_LADDER) {
+  const factor = targetProfit / 5
+  return base.map((step) => Math.round(step * factor))
 }
 
 export type StreakMachineTrade = {
