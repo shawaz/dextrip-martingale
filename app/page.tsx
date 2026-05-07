@@ -276,10 +276,10 @@ export default function DextripMartingale() {
           ) : (
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
               {[
-                { label: "Paper Balance", value: `$${Number(stats.capital).toFixed(2)}` },
-                { label: "Paper Returns", value: `$${Number(stats.portfolio).toFixed(2)}`, cayan: true },
-                { label: "Paper Invested", value: `$${Number(stats.invested).toFixed(2)}`, danger: true },
-                { label: "Paper Profits", value: `$${Number(stats.profits).toFixed(2)}`, emerald: true },
+                { label: "Total Capital", value: `$${Number(stats.capital).toFixed(2)}` },
+                { label: "Net P&L", value: `$${Number(stats.netPnl ?? stats.portfolio).toFixed(2)}`, cayan: true },
+                { label: "Invested", value: `$${Number(stats.invested).toFixed(2)}`, danger: true },
+                { label: "Win Rate", value: `${Number(stats.winRate ?? 0).toFixed(1)}%`, emerald: true },
               ].map((stat) => (
                 <div key={stat.label} className="rounded-xl border border-[#222222] bg-[#121212] p-4">
                   <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">{stat.label}</div>

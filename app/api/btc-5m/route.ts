@@ -376,12 +376,21 @@ export async function GET(req: Request) {
         profits: liveTrades.reduce((sum, trade) => sum + Number(trade.pnl ?? 0), 0),
         returns: liveTrades.reduce((sum, trade) => sum + Number(trade.pnl ?? 0), 0),
       },
+      const totalInvested = rows.reduce((sum, row) => sum + row.invested, 0)
+      const totalProfits = rows.reduce((sum, row) => sum + row.profit, 0)
+      const totalLosses = rows.reduce((sum, row) => sum + row.loss, 0)
+      const totalCapital = rows.reduce((sum, row) => sum + row.capital, 0)
+      const totalBalance = rows.reduce((sum, row) => sum + row.balance, 0)
+      const netPnl = totalProfits - totalLosses
+      
       stats: {
-        invested: rows.reduce((sum, row) => sum + row.invested, 0),
-        profits: rows.reduce((sum, row) => sum + row.profit, 0),
-        losses: rows.reduce((sum, row) => sum + row.loss, 0),
-        capital: rows.reduce((sum, row) => sum + row.capital, 0),
-        portfolio: rows.reduce((sum, row) => sum + row.balance, 0),
+        invested: totalInvested,
+        profits: totalProfits,
+        losses: totalLosses,
+        capital: totalCapital,
+        portfolio: totalBalance,
+        netPnl: netPnl,
+        winRate: totalProfits + totalLosses > 0 ? (totalProfits / (totalProfits + totalLosses)) * 100 : 0,
       },
     })
   } catch (error) {
