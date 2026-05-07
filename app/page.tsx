@@ -31,6 +31,8 @@ export default function DextripMartingale() {
   const [sseConnected, setSseConnected] = useState(false)
   const [timeLeft, setTimeLeft] = useState("0:00")
   const [targetValue, setTargetValue] = useState("5")
+  const [multiplierValue, setMultiplierValue] = useState("3")
+  const [stepsValue, setStepsValue] = useState("8")
   const [tradeFilter, setTradeFilter] = useState("")
   const [streakFilter, setStreakFilter] = useState("all")
   const [directionFilter, setDirectionFilter] = useState("all")
@@ -39,11 +41,11 @@ export default function DextripMartingale() {
 
   useEffect(() => {
     let isMounted = true
-    
+
     const connectSSE = async () => {
       try {
         const eventSource = new EventSource("/api/btc-5m/stream")
-        
+
         eventSource.onmessage = (event) => {
           if (!isMounted) return
           try {
@@ -53,31 +55,33 @@ export default function DextripMartingale() {
             } else if (msg.type === "ping" || msg.type === "connected") {
               fetchData()
             }
-          } catch {}
+          } catch { }
         }
-        
+
         eventSource.onerror = () => {
           eventSource.close()
           setTimeout(() => {
             if (isMounted) connectSSE()
           }, 5000)
         }
-        
+
         setSseConnected(true)
-      } catch {}
+      } catch { }
     }
-    
+
     const fetchData = async () => {
       const res = await fetch("/api/btc-5m")
       const json = await res.json()
       setData(json)
       if (json?.targetProfit) setTargetValue(String(json.targetProfit))
+      if (json?.multiplier) setMultiplierValue(String(json.multiplier))
+      if (json?.ladderSteps) setStepsValue(String(json.ladderSteps))
       setLoading(false)
     }
-    
+
     fetchData()
     connectSSE()
-    
+
     return () => {
       isMounted = false
     }
@@ -113,15 +117,13 @@ export default function DextripMartingale() {
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] p-4 font-sans text-white md:p-8">
+      <div></div>
       <div className="mx-auto max-w-6xl space-y-6">
-
-
-
         <div className="rounded-3xl border border-[#222222] bg-[#121212] overflow-hidden shadow-2xl">
           <div className="p-6 md:p-8 space-y-8">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
               <div className="space-y-1">
-<h1 className="text-xl md:text-2xl font-bold tracking-tight text-white">BTC-5M</h1>
+                <h1 className="text-xl md:text-2xl font-bold tracking-tight text-white">BTC-5M</h1>
                 {data?.currentWindow && (
                   <span className="text-sm text-zinc-400">
                     {new Date(data.currentWindow.startTime).toLocaleDateString("en-US", { timeZone: "America/New_York", month: "long", day: "numeric" })}, {new Date(data.currentWindow.startTime).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true })} - {new Date(data.currentWindow.endTime).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true })}
@@ -162,7 +164,6 @@ export default function DextripMartingale() {
             <div className="h-full bg-emerald-500 transition-all duration-1000 ease-linear" style={{ width: `${(1 - (parseInt(timeLeft.split(":")[0]) * 60 + parseInt(timeLeft.split(":")[1])) / 300) * 100}%` }} />
           </div>
         </div>
-
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -203,7 +204,7 @@ export default function DextripMartingale() {
                     setTargetValue(val)
                     const num = Number(val)
                     if (num > 0) {
-                      const res = await fetch(`/api/btc-5m?target=${num}`)
+                      const res = await fetch(`/api/btc-5m?target=${num}&multiplier=${multiplierValue}&steps=${stepsValue}`)
                       setData(await res.json())
                     }
                   }}
@@ -211,6 +212,45 @@ export default function DextripMartingale() {
                 />
               </div>
 
+              <span className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest ml-2">Multiplier:</span>
+              <div className="flex items-center bg-[#1a1a1a] border border-[#222222] rounded-lg px-2 py-2">
+                <input
+                  type="number"
+                  step="0.1"
+                  value={multiplierValue}
+                  onChange={async (e) => {
+                    const val = e.target.value
+                    setMultiplierValue(val)
+                    const num = Number(val)
+                    if (num > 1) {
+                      const res = await fetch(`/api/btc-5m?target=${targetValue}&multiplier=${num}&steps=${stepsValue}`)
+                      setData(await res.json())
+                    }
+                  }}
+                  className="bg-transparent border-none focus:outline-none text-white text-xs font-mono w-10"
+                />
+                <span className="text-zinc-500 text-xs font-mono ml-1">x</span>
+              </div>
+
+              <span className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest ml-2">Steps:</span>
+              <div className="flex items-center bg-[#1a1a1a] border border-[#222222] rounded-lg px-2 py-2">
+                <input
+                  type="number"
+                  min="2"
+                  max="20"
+                  value={stepsValue}
+                  onChange={async (e) => {
+                    const val = e.target.value
+                    setStepsValue(val)
+                    const num = Number(val)
+                    if (num >= 2 && num <= 20) {
+                      const res = await fetch(`/api/btc-5m?target=${targetValue}&multiplier=${multiplierValue}&steps=${num}`)
+                      setData(await res.json())
+                    }
+                  }}
+                  className="bg-transparent border-none focus:outline-none text-white text-xs font-mono w-8"
+                />
+              </div>
             </div>
           </div>
 
@@ -271,8 +311,7 @@ export default function DextripMartingale() {
                   <th className="px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Direction</th>
                   <th className="px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Status</th>
                   <th className="px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Ladder</th>
-                  <th className="px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Break</th>
-                  <th className="px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Target</th>
+                  <th className="px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Returns</th>
                   <th className="px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Invested</th>
                   <th className="px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Profit</th>
                   {activeTab === "live" ? <th className="px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Live</th> : null}
@@ -301,7 +340,7 @@ export default function DextripMartingale() {
                     </td>
                     <td className="px-4 py-4 text-zinc-400">
                       <div className="flex flex-wrap gap-2">
-                        {row.ladder.slice(0, 5).map((value, index) => (
+                        {row.ladder.map((value, index) => (
                           <span
                             key={value}
                             className={cn(
@@ -318,16 +357,29 @@ export default function DextripMartingale() {
                         ))}
                       </div>
                     </td>
-                    <td className="px-4 py-4 text-zinc-400">
-                      <div className="flex flex-wrap gap-2">
-                        {row.ladder.slice(4, 5).map((value) => (
-                          <span key={value} className="rounded-full border border-sky-500/20 bg-sky-500/10 px-2.5 py-1 text-[10px] font-bold text-sky-300">
-                            ${value}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-4 py-4 font-mono text-cyan-400">${row.targetProfit.toFixed(2)}</td>
+                    <td className="px-4 py-4 font-mono text-cyan-400">${(() => {
+                      // Returns = net return if current trade wins
+                      // Step 1: stake - 0 = stake
+                      // Step 2: stake2 - stake1
+                      // Step 3: stake3 - (stake1 + stake2)
+                      const ladder = row.ladder;
+                      const currentStep = row.currentStep;
+                      
+                      // Idle / reset → show step 1 returns
+                      if (currentStep <= 0) {
+                        return ladder[0].toFixed(2);
+                      }
+                      
+                      // Broken (step beyond ladder) → show 0
+                      if (currentStep > ladder.length) {
+                        return "0.00";
+                      }
+                      
+                      // Active step
+                      const currentStake = ladder[currentStep - 1];
+                      const previousStakes = ladder.slice(0, currentStep - 1).reduce((a, b) => a + b, 0);
+                      return (currentStake - previousStakes).toFixed(2);
+                    })()}</td>
                     <td className="px-4 py-4 font-mono text-red-400">${Number(activeTab === "live" ? row.liveInvested ?? 0 : row.invested).toFixed(2)}</td>
                     <td className="px-4 py-4 font-mono text-emerald-400">${Number(activeTab === "live" ? row.liveProfit ?? 0 : row.profit).toFixed(2)}</td>
                     {activeTab === "live" ? (
@@ -360,7 +412,6 @@ export default function DextripMartingale() {
             </table>
           </div>
         </div>
-
         {activeTab === "paper" ? (
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3 flex-wrap">

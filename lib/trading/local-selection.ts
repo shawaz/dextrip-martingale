@@ -1,5 +1,6 @@
 import { desc, eq } from "drizzle-orm";
-import { db, agentStrategyCards, strategies, trades } from "@/db/index";
+import { db } from "@/db/index";
+import { agentStrategyCards, strategies, trades } from "@/db/schema";
 
 export type MarketState = {
   price: number;

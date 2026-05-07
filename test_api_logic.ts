@@ -1,13 +1,13 @@
 import { db } from "./db/client";
 import { agents, trades } from "./db/schema";
 import { eq } from "drizzle-orm";
-import { buildScaledLadder, replayStreakMachine } from "./lib/trading/streak-machine";
+import { buildLadder, replayStreakMachine } from "./lib/trading/streak-machine";
 
 async function test() {
   console.log("--- Testing Martingale Logic ---");
   
   const targetProfit = 5;
-  const ladder = buildScaledLadder(targetProfit);
+  const ladder = buildLadder(targetProfit, 3, 8);
   console.log("Ladder:", ladder);
 
   const streakAgents = [

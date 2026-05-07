@@ -1,8 +1,24 @@
-export const DEFAULT_STREAK_LADDER = [1, 3, 9, 27]  // 3x martingale ladder
+export function buildLadder(targetProfit: number, multiplier: number, steps: number): number[] {
+  const ladder: number[] = []
+  let current = targetProfit
+  for (let i = 0; i < steps; i++) {
+    ladder.push(Math.max(1, Math.round(current)))
+    current *= multiplier
+  }
+  return ladder
+}
 
-export function buildScaledLadder(targetProfit: number, base = DEFAULT_STREAK_LADDER) {
-  const factor = targetProfit / 5
-  return base.map((step) => Math.round(step * factor))
+export type StreakMachineState = {
+  roundsCompleted: number
+  successfulCycles: number
+  failedCycles: number
+  currentStep: number
+  previousStep: number
+  investedOpen: number
+  realizedProfit: number
+  realizedLoss: number
+  totalCapital: number
+  status: "idle" | "active" | "broken"
 }
 
 export type StreakMachineTrade = {
@@ -24,11 +40,6 @@ export function createInitialStreakState(capital: number): StreakMachineState {
     totalCapital: capital,
     status: "idle",
   }
-}
-
-export function buildScaledLadder(targetProfit: number, base = DEFAULT_STREAK_LADDER) {
-  const factor = targetProfit / 5
-  return base.map((step) => Math.round(step * factor))
 }
 
 export function replayStreakMachine(trades: StreakMachineTrade[], ladder: number[], targetProfit: number, capital: number) {
@@ -56,9 +67,11 @@ export function replayStreakMachine(trades: StreakMachineTrade[], ladder: number
       continue
     }
 
+    // Every loss costs the stake amount
+    state.realizedLoss += Number(trade.stake)
+
     if (resolvedStep >= ladder.length) {
       state.failedCycles += 1
-      state.realizedLoss += ladder.reduce((sum, value) => sum + value, 0)
       state.previousStep = resolvedStep
       state.currentStep = 0
       state.investedOpen = 0

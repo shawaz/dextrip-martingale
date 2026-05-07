@@ -1,16 +1,28 @@
 import { NextResponse } from "next/server"
 import { db, agents, rounds, trades, settings, walletBalances } from "@/db/index"
 import { eq, and, desc, lt } from "drizzle-orm"
-import { buildScaledLadder, replayStreakMachine } from "@/lib/trading/streak-machine"
+import { buildLadder, replayStreakMachine } from "@/lib/trading/streak-machine"
+
+async function getSetting(key: string, fallback: number): Promise<number> {
+  try {
+    const setting = await db().query.settings.findFirst({ where: eq(settings.key, key) })
+    return setting ? Number(setting.value) : fallback
+  } catch (error) {
+    console.error(`getSetting(${key}) error:`, error);
+    return fallback
+  }
+}
 
 async function getTargetProfit() {
-  try {
-    const setting = await db().query.settings.findFirst({ where: eq(settings.key, "martingale_target_profit") })
-    return setting ? Number(setting.value) : 5
-  } catch (error) {
-    console.error("getTargetProfit error:", error);
-    return 5
-  }
+  return getSetting("martingale_target_profit", 5)
+}
+
+async function getMultiplier() {
+  return getSetting("martingale_multiplier", 3)
+}
+
+async function getLadderSteps() {
+  return getSetting("martingale_ladder_steps", 8)
 }
 
 function calculateRsi(closes: number[], period = 14): number | null {
@@ -28,15 +40,12 @@ function calculateRsi(closes: number[], period = 14): number | null {
 }
 
 const streakAgents = [
-  { id: "EVERY_5M", name: "Every", direction: "BOTH", trigger: "always" },
-  { id: "PREVIOUS_UP_5M", name: "Previous UP", direction: "UP", trigger: "prev_up" },
-  { id: "PREVIOUS_DOWN_5M", name: "Previous DOWN", direction: "DOWN", trigger: "prev_down" },
-  { id: "PREVIOUS_THREE_UP_5M", name: "Previous 3 UP", direction: "DOWN", trigger: "prev_three_up" },
-  { id: "PREVIOUS_THREE_DOWN_5M", name: "Previous 3 DOWN", direction: "UP", trigger: "prev_three_down" },
-  { id: "PREVIOUS_FIVE_UP_5M", name: "Previous 5 UP", direction: "DOWN", trigger: "prev_five_up" },
-  { id: "PREVIOUS_FIVE_DOWN_5M", name: "Previous 5 DOWN", direction: "UP", trigger: "prev_five_down" },
-  { id: "RSI_UP_5M", name: "RSI UP", direction: "UP", trigger: "rsi_up" },
-  { id: "RSI_DOWN_5M", name: "RSI DOWN", direction: "DOWN", trigger: "rsi_down" },
+  { id: "EVERY_UP_5M", name: "Every UP", direction: "UP", trigger: "always" },
+  { id: "EVERY_DOWN_5M", name: "Every DOWN", direction: "DOWN", trigger: "always" },
+  { id: "PREVIOUS_5M", name: "Previous", direction: "OPPOSITE", streak: 2 },
+  { id: "PREVIOUS_3_5M", name: "Previous 3", direction: "OPPOSITE", streak: 3 },
+  { id: "PREVIOUS_5_5M", name: "Previous 5", direction: "OPPOSITE", streak: 5 },
+  { id: "RSI_5M", name: "RSI", direction: "RSI", trigger: "rsi" },
 ]
 
 async function seedAgents() {
@@ -48,7 +57,7 @@ async function seedAgents() {
         id: a.id,
         name: a.name,
         initials: a.name.split(" ").map((n) => n[0]).join(""),
-        color: a.direction === "BOTH" ? "#3b82f6" : a.direction === "UP" ? "#10b981" : "#ef4444",
+        color: a.direction === "BOTH" || a.direction === "OPPOSITE" ? "#3b82f6" : a.direction === "UP" ? "#10b981" : "#ef4444",
         timeframe: "5m",
         bankroll: 1000,
         startingBankroll: 1000,
@@ -110,6 +119,8 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url)
     const shouldReset = searchParams.get("reset") === "true"
     const newTarget = searchParams.get("target")
+    const newMultiplier = searchParams.get("multiplier")
+    const newSteps = searchParams.get("steps")
     const toggleAgent = searchParams.get("toggleLive")
     const toggleEnabled = searchParams.get("liveEnabled") === "true"
 
@@ -140,14 +151,44 @@ export async function GET(req: Request) {
       }
     }
 
+    if (newMultiplier) {
+      const val = Number(newMultiplier)
+      if (!Number.isNaN(val) && val > 1) {
+        await db().insert(settings).values({
+          key: "martingale_multiplier",
+          value: String(val),
+          updatedAt: new Date().toISOString(),
+        }).onConflictDoUpdate({
+          target: settings.key,
+          set: { value: String(val), updatedAt: new Date().toISOString() },
+        })
+      }
+    }
+
+    if (newSteps) {
+      const val = Number(newSteps)
+      if (!Number.isNaN(val) && val >= 2 && val <= 20) {
+        await db().insert(settings).values({
+          key: "martingale_ladder_steps",
+          value: String(val),
+          updatedAt: new Date().toISOString(),
+        }).onConflictDoUpdate({
+          target: settings.key,
+          set: { value: String(val), updatedAt: new Date().toISOString() },
+        })
+      }
+    }
+
     const targetProfit = await getTargetProfit()
+    const multiplier = await getMultiplier()
+    const ladderSteps = await getLadderSteps()
     const wallet = await getWalletBalance()
     let dbBalance = 0
     try {
       const wb = await db().select().from(walletBalances).where(eq(walletBalances.id, 1)).limit(1)
       if (wb[0]) dbBalance = Number(wb[0].usdcBalance ?? 0)
     } catch {}
-    const ladder = buildScaledLadder(targetProfit)
+    const ladder = buildLadder(targetProfit, multiplier, ladderSteps)
 
     await seedAgents()
 
@@ -158,26 +199,8 @@ export async function GET(req: Request) {
     const startTimeIso = new Date(windowTs * 1000).toISOString()
     const endTimeIso = new Date((windowTs + intervalS) * 1000).toISOString()
 
-    const existingRound = await db().query.rounds.findFirst({ where: eq(rounds.startTime, startTimeIso) })
-    if (!existingRound) {
-      await db().insert(rounds).values({
-        id: crypto.randomUUID(),
-        roundId: `BTC5M-${windowTs}`,
-        asset: "BTC",
-        timeframe: "5m",
-        startTime: startTimeIso,
-        endTime: endTimeIso,
-        entryPrice: 0,
-        status: "open",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      })
-    }
-
-    const openRounds = await db().select().from(rounds).where(and(eq(rounds.timeframe, "5m"), eq(rounds.status, "open"), lt(rounds.startTime, startTimeIso)))
-    for (const round of openRounds) {
-      // Skip resolution - Railway handles fetching from Polymarket
-    }
+    // Note: Round creation is handled exclusively by the paper trading bot
+    // to ensure accurate entry prices from live market data
 
     const activeRound = await db().query.rounds.findFirst({ where: eq(rounds.startTime, startTimeIso) })
 
@@ -186,15 +209,28 @@ export async function GET(req: Request) {
       .map((round) => Number(round.officialExitPrice ?? round.exitPrice ?? 0))
       .filter((value) => value > 0)
       .reverse()
-    const currentPrice = 0
+    // Fetch current BTC price for RSI calculation
+    let currentPrice = 0
+    try {
+      const res = await fetch("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT")
+      const data = await res.json()
+      currentPrice = Number(data.price)
+    } catch (e) {
+      console.error("[API] Failed to fetch BTC price:", e)
+    }
     const rsi = calculateRsi(currentPrice > 0 ? [...recentCloses, currentPrice] : recentCloses, 14)
 
     const recentDirections = closedRounds
       .map((round) => round.resolvedDirection)
       .filter((direction): direction is string => Boolean(direction))
     const previousDirection = recentDirections[0] ?? null
-    const previousThreeUp = recentDirections.slice(0, 3).length === 3 && recentDirections.slice(0, 3).every((direction) => direction === "UP")
-    const previousThreeDown = recentDirections.slice(0, 3).length === 3 && recentDirections.slice(0, 3).every((direction) => direction === "DOWN")
+    function getStreakSignal(minLength: number): string | null {
+      if (recentDirections.length < minLength) return null
+      const slice = recentDirections.slice(0, minLength)
+      if (slice.every((d) => d === "UP")) return "DOWN"
+      if (slice.every((d) => d === "DOWN")) return "UP"
+      return null
+    }
 
     if (activeRound) {
       // No trade creation here — Railway bot is the sole executor
@@ -207,9 +243,7 @@ export async function GET(req: Request) {
 
     const rows = streakAgents.map((streak) => {
       const agent = agentResults.find((row) => row.id === streak.id)
-      const baseTrades = streak.id === "PREVIOUS_THREE_UP_5M" || streak.id === "PREVIOUS_THREE_DOWN_5M"
-        ? (paperTrades.filter((trade) => trade.agentId === streak.id && trade.roundId.startsWith("BTC5M-")).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()))
-        : (paperTrades.filter((trade) => trade.agentId === streak.id && trade.roundId.startsWith("BTC5M-")).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()))
+      const baseTrades = paperTrades.filter((trade) => trade.agentId === streak.id && trade.roundId.startsWith("BTC5M-")).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
       const liveAgentTrades = liveTrades
         .filter((trade) => trade.agentId === streak.id && trade.roundId.startsWith("BTC5M-"))
         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
@@ -247,23 +281,19 @@ export async function GET(req: Request) {
       const livePendingStake = liveAgentTrades.filter((trade) => trade.result === "pending").reduce((sum, trade) => sum + Number(trade.stake ?? 0), 0)
       const liveRealizedProfit = liveAgentTrades.reduce((sum, trade) => sum + Math.max(0, Number(trade.pnl ?? 0)), 0)
       const liveRealizedLoss = liveAgentTrades.reduce((sum, trade) => sum + Math.abs(Math.min(0, Number(trade.pnl ?? 0))), 0)
-      const balance = state.realizedProfit - state.realizedLoss - invested
+      const balance = state.realizedProfit - state.realizedLoss
+      const streakSignal = (streak as any).streak ? getStreakSignal((streak as any).streak) : null
       const triggerActive =
         streak.trigger === "always" ? true :
-        streak.trigger === "prev_up" ? previousDirection === "UP" :
-        streak.trigger === "prev_down" ? previousDirection === "DOWN" :
-        streak.trigger === "prev_three_up" ? previousThreeUp :
-        streak.trigger === "prev_three_down" ? previousThreeDown :
-        streak.trigger === "prev_five_up" ? (recentDirections.slice(0, 5).length === 5 && recentDirections.slice(0, 5).every((d) => d === "UP")) :
-        streak.trigger === "prev_five_down" ? (recentDirections.slice(0, 5).length === 5 && recentDirections.slice(0, 5).every((d) => d === "DOWN")) :
-        streak.trigger === "rsi_up" ? rsi != null && rsi <= 30 :
-        streak.trigger === "rsi_down" ? rsi != null && rsi >= 80 : false
+        streakSignal != null ? true :
+        streak.trigger === "rsi" ? (rsi != null && (rsi <= 30 || rsi >= 80)) : false
 
       const isLive = agent?.isLive ?? false
+      const direction = streakSignal ?? streak.direction
       return {
         id: streak.id,
         name: streak.name,
-        direction: streak.direction,
+        direction,
         roundsCompleted: state.roundsCompleted,
         currentStep,
         previousStep,
@@ -335,6 +365,8 @@ export async function GET(req: Request) {
       }),
       rsi,
       targetProfit,
+      multiplier,
+      ladderSteps,
       ladder,
       liveHistory,
       wallet,
@@ -347,8 +379,9 @@ export async function GET(req: Request) {
       stats: {
         invested: rows.reduce((sum, row) => sum + row.invested, 0),
         profits: rows.reduce((sum, row) => sum + row.profit, 0),
+        losses: rows.reduce((sum, row) => sum + row.loss, 0),
         capital: rows.reduce((sum, row) => sum + row.capital, 0),
-        portfolio: rows.reduce((sum, row) => sum + row.profit, 0) - rows.reduce((sum, row) => sum + row.invested, 0),
+        portfolio: rows.reduce((sum, row) => sum + row.balance, 0),
       },
     })
   } catch (error) {
