@@ -273,7 +273,7 @@ export default function DextripMartingale() {
                   { label: "Wallet", value: data?.wallet?.wallet ? `${data.wallet.wallet.slice(0, 6)}...${data.wallet.wallet.slice(-4)}` : "Not Set", danger: !data?.wallet?.wallet },
                   { label: "Status", value: data?.wallet?.connected ? "Connected" : "Disconnected", cayan: !!data?.wallet?.connected, danger: !data?.wallet?.connected },
                   { label: "Last Check", value: data?.wallet?.lastUpdated ? new Date(data.wallet.lastUpdated).toLocaleTimeString() : "Never", danger: true },
-                ].map((stat) => (
+                ].map((stat: any) => (
                   <div key={stat.label} className="rounded-xl border border-[#222222] bg-[#121212] p-4">
                     <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">{stat.label}</div>
                     <div className={cn("mt-2 text-xl font-semibold", stat.danger ? "text-red-400" : stat.cayan ? "text-cyan-400" : stat.emerald ? "text-emerald-400" : "text-white")}>{stat.value}</div>
