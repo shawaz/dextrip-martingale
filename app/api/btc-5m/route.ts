@@ -347,56 +347,70 @@ export async function GET(req: Request) {
         return { ...trade, windowLabel }
       })
 
+    const totalProfits = rows.reduce((sum, row) => sum + row.profit, 0)
+    const totalLosses = rows.reduce((sum, row) => sum + row.loss, 0)
+    const totalInvested = rows.reduce((sum, row) => sum + row.invested, 0)
+    const totalBalance = rows.reduce((sum, row) => sum + row.balance, 0)
+    const totalStartingCapital = rows.reduce((sum, row) => sum + (row.capital - row.balance), 0)
+    const netPnl = totalProfits - totalLosses
+    const totalWins = rows.reduce((sum, row) => sum + (row.profit > 0 ? Math.round(row.profit / targetProfit) : 0), 0)
+    const totalTrades = rows.reduce((sum, row) => sum + row.roundsCompleted, 0)
+    
     return NextResponse.json({
-      live: null,
-      currentWindow: {
-        roundId: activeRound?.roundId,
-        startTime: startTimeIso,
-        endTime: endTimeIso,
-      },
-      rows,
-      recommendedTrades,
-      history: [],
-      recentResultsIcons: recentDirections.slice(0, 20).map(d => d === "UP" ? "↑" : "↓"),
-      debugRecentResults: [],
-      liveFocus,
-      recentTrades: recentTrades.slice(0, 50).map((trade) => {
-        const match = String(trade.roundId).match(/BTC5M-(\d+)/)
-        const start = match ? new Date(Number(match[1]) * 1000) : null
-        const end = start ? new Date(start.getTime() + 5 * 60 * 1000) : null
-        const windowLabel = start && end
-          ? `${start.toLocaleDateString("en-US", { month: "long", day: "numeric" })}, ${start.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true })} - ${end.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true })}`
-          : trade.roundId
-        const ladderIndex = ladder.indexOf(Number(trade.stake))
-        const ladderStage = ladderIndex >= 0 ? ladderIndex + 1 : null
-        const tradeProfit = trade.result === "won" ? targetProfit : 0
-        const closedStage = trade.result === "won" ? ladderStage : null
-        return { ...trade, windowLabel, ladderStage, tradeProfit, closedStage }
-      }),
-      rsi,
-      targetProfit,
-      multiplier,
-      ladderSteps,
-      ladder,
-      liveHistory,
-      wallet,
-      liveSummary: {
-        balance: dbBalance || wallet?.balance || 0,
-        invested: liveTrades.filter((trade) => trade.result === "pending").reduce((sum, trade) => sum + Number(trade.stake ?? 0), 0),
-        profits: liveTrades.reduce((sum, trade) => sum + Number(trade.pnl ?? 0), 0),
-        returns: liveTrades.reduce((sum, trade) => sum + Number(trade.pnl ?? 0), 0),
-      },
-      stats: {
-        invested: rows.reduce((sum, row) => sum + row.invested, 0),
-        profits: rows.reduce((sum, row) => sum + row.profit, 0),
-        losses: rows.reduce((sum, row) => sum + row.loss, 0),
-        capital: rows.reduce((sum, row) => sum + row.capital, 0),
-        portfolio: rows.reduce((sum, row) => sum + row.balance, 0),
-        netPnl: rows.reduce((sum, row) => sum + row.profit, 0) - rows.reduce((sum, row) => sum + row.loss, 0),
-        winRate: (rows.reduce((sum, row) => sum + row.profit, 0) + rows.reduce((sum, row) => sum + row.loss, 0)) > 0 ? 
-          (rows.reduce((sum, row) => sum + row.profit, 0) / (rows.reduce((sum, row) => sum + row.profit, 0) + rows.reduce((sum, row) => sum + row.loss, 0))) * 100 : 0,
-      },
-    })
+        live: null,
+        currentWindow: {
+          roundId: activeRound?.roundId,
+          startTime: startTimeIso,
+          endTime: endTimeIso,
+        },
+        rows,
+        recommendedTrades,
+        history: [],
+        recentResultsIcons: recentDirections.slice(0, 20).map(d => d === "UP" ? "↑" : "↓"),
+        debugRecentResults: [],
+        liveFocus,
+        recentTrades: recentTrades.slice(0, 50).map((trade, index, allTrades) => {
+          const match = String(trade.roundId).match(/BTC5M-(\d+)/)
+          const start = match ? new Date(Number(match[1]) * 1000) : null
+          const end = start ? new Date(start.getTime() + 5 * 60 * 1000) : null
+          const windowLabel = start && end
+            ? `${start.toLocaleDateString("en-US", { month: "long", day: "numeric" })}, ${start.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true })} - ${end.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true })}`
+            : trade.roundId
+          const ladderIndex = ladder.indexOf(Number(trade.stake))
+          const ladderStage = ladderIndex >= 0 ? ladderIndex + 1 : null
+          const tradeProfit = trade.result === "won" ? targetProfit : -Number(trade.stake)
+          const closedStage = trade.result === "won" ? ladderStage : null
+          // Calculate running balance (cumulative PnL up to this trade)
+          const runningBalance = allTrades
+            .slice(0, index + 1)
+            .reduce((sum, t) => sum + (t.result === "won" ? targetProfit : -Number(t.stake)), 0)
+          return { ...trade, windowLabel, ladderStage, tradeProfit, closedStage, runningBalance }
+        }),
+        rsi,
+        targetProfit,
+        multiplier,
+        ladderSteps,
+        ladder,
+        liveHistory,
+        wallet,
+        liveSummary: {
+          balance: dbBalance || wallet?.balance || 0,
+          invested: liveTrades.filter((trade) => trade.result === "pending").reduce((sum, trade) => sum + Number(trade.stake ?? 0), 0),
+          profits: liveTrades.reduce((sum, trade) => sum + Number(trade.pnl ?? 0), 0),
+          returns: liveTrades.reduce((sum, trade) => sum + Number(trade.pnl ?? 0), 0),
+        },
+        stats: {
+          invested: totalInvested,
+          profits: totalProfits,
+          losses: totalLosses,
+          capital: totalStartingCapital + totalBalance,
+          portfolio: totalBalance,
+          netPnl: netPnl,
+          winRate: totalTrades > 0 ? (totalWins / totalTrades) * 100 : 0,
+          totalWins: totalWins,
+          totalTrades: totalTrades,
+        },
+      })
   } catch (error) {
     console.error("BTC-5M API error:", error)
     return NextResponse.json({ error: "Internal Server Error", details: String(error) }, { status: 500 })

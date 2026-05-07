@@ -7,13 +7,13 @@ import { cn } from "@/lib/utils"
 
 // Polymarket Event Structure
 const ASSET_OPTIONS = [
-  { id: "BTC", name: "Bitcoin", icon: "₿", color: "#F7931A", fullName: "BTC Up or Down" },
-  { id: "ETH", name: "Ethereum", icon: "Ξ", color: "#627EEA", fullName: "ETH Up or Down" },
-  { id: "SOL", name: "Solana", icon: "◎", color: "#14F195", fullName: "SOL Up or Down" },
-  { id: "XRP", name: "XRP", icon: "✕", color: "#23292F", fullName: "XRP Up or Down" },
-  { id: "DOGE", name: "Dogecoin", icon: "Ð", color: "#C2A633", fullName: "DOGE Up or Down" },
-  { id: "HYPE", name: "Hyperliquid", icon: "H", color: "#00FF94", fullName: "HYPE Up or Down" },
-  { id: "BNB", name: "BNB", icon: "B", color: "#F3BA2F", fullName: "BNB Up or Down" },
+  { id: "BTC", name: "Bitcoin", color: "#F7931A", fullName: "BTC Up or Down" },
+  { id: "ETH", name: "Ethereum", color: "#627EEA", fullName: "ETH Up or Down" },
+  { id: "SOL", name: "Solana", color: "#14F195", fullName: "SOL Up or Down" },
+  { id: "XRP", name: "XRP", color: "#23292F", fullName: "XRP Up or Down" },
+  { id: "DOGE", name: "Dogecoin", color: "#C2A633", fullName: "DOGE Up or Down" },
+  { id: "HYPE", name: "Hyperliquid", color: "#00FF94", fullName: "HYPE Up or Down" },
+  { id: "BNB", name: "BNB", color: "#F3BA2F", fullName: "BNB Up or Down" },
 ]
 
 const TIMEFRAME_OPTIONS = [
@@ -47,15 +47,15 @@ export function Navbar({
 
   const selectedAssetData = ASSET_OPTIONS.find((a) => a.id === selectedAsset)
   const selectedTimeframeData = TIMEFRAME_OPTIONS.find((t) => t.id === selectedTimeframe)
-  
+
   // Polymarket-style event name: "BTC Up or Down 5m"
-  const eventName = selectedAssetData && selectedTimeframeData 
+  const eventName = selectedAssetData && selectedTimeframeData
     ? `${selectedAssetData.fullName} ${selectedTimeframeData.name}`
     : "Select Event"
 
   return (
     <nav className="sticky top-0 z-50 w-full border-b border-[#222222] bg-[#0a0a0a]/95 backdrop-blur supports-[backdrop-filter]:bg-[#0a0a0a]/60">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl">
         <div className="flex h-16 items-center justify-between">
           {/* Logo */}
           <div className="flex items-center gap-3">
@@ -63,17 +63,7 @@ export function Navbar({
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-cyan-500">
                 <Activity className="h-6 w-6 text-white" />
               </div>
-              <span className="hidden text-xl font-bold text-white sm:block">Dextrip</span>
             </Link>
-          </div>
-
-          {/* Center Controls */}
-          <div className="flex items-center gap-2 sm:gap-4">
-            {/* Event Display */}
-            <div className="hidden md:flex items-center gap-2 px-3 py-2 rounded-lg border border-[#222222] bg-[#121212]">
-              <span className="text-sm font-medium text-white">{eventName}</span>
-              <span className="text-xs text-emerald-400">● Live</span>
-            </div>
 
             {/* Asset Selector */}
             <div className="relative">
@@ -84,7 +74,6 @@ export function Navbar({
                   assetOpen && "border-emerald-500/50"
                 )}
               >
-                <span className="text-lg">{selectedAssetData?.icon}</span>
                 <span className="hidden sm:inline">{selectedAssetData?.name}</span>
                 <span className="sm:hidden">{selectedAssetData?.id}</span>
                 <ChevronDown className={cn("h-4 w-4 text-zinc-500 transition-transform", assetOpen && "rotate-180")} />
@@ -107,7 +96,6 @@ export function Navbar({
                       )}
                     >
                       <div className="flex items-center gap-3">
-                        <span className="text-lg">{asset.icon}</span>
                         <div>
                           <span className="font-medium block">{asset.name}</span>
                           <span className="text-[10px] text-zinc-500">{asset.fullName}</span>
