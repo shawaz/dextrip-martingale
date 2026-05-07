@@ -101,16 +101,26 @@ async function toggleLiveAgent(agentId: string, enabled: boolean) {
 async function getWalletBalance() {
   const key = process.env.POLYMARKET_PRIVATE_KEY
   const funder = process.env.POLYMARKET_FUNDER
-  if (!key || !funder) return { connected: false, balance: null }
+  if (!key || !funder) return { connected: false, balance: null, wallet: null }
   try {
-    const res = await fetch("https://clob.polymarket.com/balance-allowance?asset_type=0", {
-      headers: { "POLYMARKET-API-KEY": key }
+    // Add cache-busting timestamp
+    const timestamp = Date.now()
+    const res = await fetch(`https://clob.polymarket.com/balance-allowance?asset_type=0&_=${timestamp}`, {
+      headers: { 
+        "POLYMARKET-API-KEY": key,
+        "Cache-Control": "no-cache"
+      }
     })
-    if (!res.ok) return { connected: true, balance: null }
+    if (!res.ok) return { connected: true, balance: null, wallet: funder }
     const data = await res.json()
-    return { connected: true, balance: data.balance ? data.balance / 1_000_000 : 0 }
+    return { 
+      connected: true, 
+      balance: data.balance ? data.balance / 1_000_000 : 0,
+      wallet: funder,
+      lastUpdated: new Date().toISOString()
+    }
   } catch {
-    return { connected: true, balance: null }
+    return { connected: true, balance: null, wallet: funder }
   }
 }
 

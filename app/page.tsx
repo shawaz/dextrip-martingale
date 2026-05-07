@@ -260,10 +260,10 @@ export default function DextripMartingale() {
             <>
               <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                 {[
-                  { label: "Live Balance", value: data?.liveSummary?.balance != null ? `$${Number(data.liveSummary.balance).toFixed(2)}` : `$0.00` },
-                  { label: "Connection", value: data?.wallet?.connected ? "Connected" : "Disconnected", cayan: !!data?.wallet?.connected, danger: !data?.wallet?.connected },
-                  { label: "Live Invested", value: data?.liveSummary?.invested != null ? `$${Number(data.liveSummary.invested).toFixed(2)}` : `$0.00`, danger: true },
-                  { label: "Live Profits", value: data?.liveSummary?.profits != null ? `$${Number(data.liveSummary.profits).toFixed(2)}` : `$0.00`, emerald: true },
+                  { label: "Live Balance", value: data?.liveSummary?.balance != null ? `$${Number(data.liveSummary.balance).toFixed(2)}` : `Check Wallet`, cayan: true },
+                  { label: "Wallet", value: data?.wallet?.wallet ? `${data.wallet.wallet.slice(0, 6)}...${data.wallet.wallet.slice(-4)}` : "Not Set", danger: !data?.wallet?.wallet },
+                  { label: "Status", value: data?.wallet?.connected ? "Connected" : "Disconnected", cayan: !!data?.wallet?.connected, danger: !data?.wallet?.connected },
+                  { label: "Last Check", value: data?.wallet?.lastUpdated ? new Date(data.wallet.lastUpdated).toLocaleTimeString() : "Never", danger: true },
                 ].map((stat) => (
                   <div key={stat.label} className="rounded-xl border border-[#222222] bg-[#121212] p-4">
                     <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">{stat.label}</div>
