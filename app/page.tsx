@@ -119,9 +119,9 @@ export default function DextripMartingale() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] font-sans text-white">
       <Navbar
-        selectedCrypto="BTC"
+        selectedAsset="BTC"
         selectedTimeframe="5m"
-        onCryptoChange={(crypto) => console.log("Selected crypto:", crypto)}
+        onAssetChange={(asset) => console.log("Selected asset:", asset)}
         onTimeframeChange={(timeframe) => console.log("Selected timeframe:", timeframe)}
         walletConnected={data?.wallet?.connected}
         walletAddress={data?.wallet?.wallet}

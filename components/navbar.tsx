@@ -5,25 +5,28 @@ import Link from "next/link"
 import { Wallet, ChevronDown, Bitcoin, Activity } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-const CRYPTO_OPTIONS = [
-  { id: "BTC", name: "Bitcoin", icon: "₿", color: "#F7931A" },
-  { id: "ETH", name: "Ethereum", icon: "Ξ", color: "#627EEA" },
-  { id: "SOL", name: "Solana", icon: "◎", color: "#14F195" },
-  { id: "AVAX", name: "Avalanche", icon: "🔺", color: "#E84142" },
-  { id: "LINK", name: "Chainlink", icon: "⬡", color: "#2A5ADA" },
+// Polymarket Event Structure
+const ASSET_OPTIONS = [
+  { id: "BTC", name: "Bitcoin", icon: "₿", color: "#F7931A", fullName: "BTC Up or Down" },
+  { id: "ETH", name: "Ethereum", icon: "Ξ", color: "#627EEA", fullName: "ETH Up or Down" },
+  { id: "SOL", name: "Solana", icon: "◎", color: "#14F195", fullName: "SOL Up or Down" },
+  { id: "XRP", name: "XRP", icon: "✕", color: "#23292F", fullName: "XRP Up or Down" },
+  { id: "DOGE", name: "Dogecoin", icon: "Ð", color: "#C2A633", fullName: "DOGE Up or Down" },
+  { id: "HYPE", name: "Hyperliquid", icon: "H", color: "#00FF94", fullName: "HYPE Up or Down" },
+  { id: "BNB", name: "BNB", icon: "B", color: "#F3BA2F", fullName: "BNB Up or Down" },
 ]
 
 const TIMEFRAME_OPTIONS = [
-  { id: "1m", name: "1 Minute", seconds: 60 },
-  { id: "5m", name: "5 Minutes", seconds: 300 },
-  { id: "15m", name: "15 Minutes", seconds: 900 },
-  { id: "1h", name: "1 Hour", seconds: 3600 },
+  { id: "5m", name: "5M", label: "5 Minutes", seconds: 300 },
+  { id: "15m", name: "15M", label: "15 Minutes", seconds: 900 },
+  { id: "1h", name: "1H", label: "1 Hour", seconds: 3600 },
+  { id: "4h", name: "4H", label: "4 Hours", seconds: 14400 },
 ]
 
 interface NavbarProps {
-  selectedCrypto?: string
+  selectedAsset?: string
   selectedTimeframe?: string
-  onCryptoChange?: (crypto: string) => void
+  onAssetChange?: (asset: string) => void
   onTimeframeChange?: (timeframe: string) => void
   walletConnected?: boolean
   walletAddress?: string
@@ -31,19 +34,24 @@ interface NavbarProps {
 }
 
 export function Navbar({
-  selectedCrypto = "BTC",
+  selectedAsset = "BTC",
   selectedTimeframe = "5m",
-  onCryptoChange,
+  onAssetChange,
   onTimeframeChange,
   walletConnected = false,
   walletAddress,
   onConnectWallet,
 }: NavbarProps) {
-  const [cryptoOpen, setCryptoOpen] = useState(false)
+  const [assetOpen, setAssetOpen] = useState(false)
   const [timeframeOpen, setTimeframeOpen] = useState(false)
 
-  const selectedCryptoData = CRYPTO_OPTIONS.find((c) => c.id === selectedCrypto)
+  const selectedAssetData = ASSET_OPTIONS.find((a) => a.id === selectedAsset)
   const selectedTimeframeData = TIMEFRAME_OPTIONS.find((t) => t.id === selectedTimeframe)
+  
+  // Polymarket-style event name: "BTC Up or Down 5m"
+  const eventName = selectedAssetData && selectedTimeframeData 
+    ? `${selectedAssetData.fullName} ${selectedTimeframeData.name}`
+    : "Select Event"
 
   return (
     <nav className="sticky top-0 z-50 w-full border-b border-[#222222] bg-[#0a0a0a]/95 backdrop-blur supports-[backdrop-filter]:bg-[#0a0a0a]/60">
@@ -61,40 +69,51 @@ export function Navbar({
 
           {/* Center Controls */}
           <div className="flex items-center gap-2 sm:gap-4">
-            {/* Crypto Selector */}
+            {/* Event Display */}
+            <div className="hidden md:flex items-center gap-2 px-3 py-2 rounded-lg border border-[#222222] bg-[#121212]">
+              <span className="text-sm font-medium text-white">{eventName}</span>
+              <span className="text-xs text-emerald-400">● Live</span>
+            </div>
+
+            {/* Asset Selector */}
             <div className="relative">
               <button
-                onClick={() => setCryptoOpen(!cryptoOpen)}
+                onClick={() => setAssetOpen(!assetOpen)}
                 className={cn(
                   "flex items-center gap-2 rounded-lg border border-[#222222] bg-[#121212] px-3 py-2 text-sm font-medium text-white transition-all hover:border-[#333333] hover:bg-[#1a1a1a]",
-                  cryptoOpen && "border-emerald-500/50"
+                  assetOpen && "border-emerald-500/50"
                 )}
               >
-                <span className="text-lg">{selectedCryptoData?.icon}</span>
-                <span className="hidden sm:inline">{selectedCryptoData?.name}</span>
-                <span className="sm:hidden">{selectedCryptoData?.id}</span>
-                <ChevronDown className={cn("h-4 w-4 text-zinc-500 transition-transform", cryptoOpen && "rotate-180")} />
+                <span className="text-lg">{selectedAssetData?.icon}</span>
+                <span className="hidden sm:inline">{selectedAssetData?.name}</span>
+                <span className="sm:hidden">{selectedAssetData?.id}</span>
+                <ChevronDown className={cn("h-4 w-4 text-zinc-500 transition-transform", assetOpen && "rotate-180")} />
               </button>
 
-              {cryptoOpen && (
-                <div className="absolute left-0 top-full z-50 mt-2 w-48 rounded-xl border border-[#222222] bg-[#121212] p-1 shadow-2xl">
-                  {CRYPTO_OPTIONS.map((crypto) => (
+              {assetOpen && (
+                <div className="absolute left-0 top-full z-50 mt-2 w-56 rounded-xl border border-[#222222] bg-[#121212] p-1 shadow-2xl">
+                  {ASSET_OPTIONS.map((asset) => (
                     <button
-                      key={crypto.id}
+                      key={asset.id}
                       onClick={() => {
-                        onCryptoChange?.(crypto.id)
-                        setCryptoOpen(false)
+                        onAssetChange?.(asset.id)
+                        setAssetOpen(false)
                       }}
                       className={cn(
-                        "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors",
-                        selectedCrypto === crypto.id
+                        "flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-colors",
+                        selectedAsset === asset.id
                           ? "bg-emerald-500/10 text-emerald-400"
                           : "text-zinc-300 hover:bg-[#1a1a1a] hover:text-white"
                       )}
                     >
-                      <span className="text-lg">{crypto.icon}</span>
-                      <span className="font-medium">{crypto.name}</span>
-                      <span className="ml-auto text-xs text-zinc-500">{crypto.id}</span>
+                      <div className="flex items-center gap-3">
+                        <span className="text-lg">{asset.icon}</span>
+                        <div>
+                          <span className="font-medium block">{asset.name}</span>
+                          <span className="text-[10px] text-zinc-500">{asset.fullName}</span>
+                        </div>
+                      </div>
+                      <span className="text-xs text-zinc-500">{asset.id}</span>
                     </button>
                   ))}
                 </div>
@@ -164,11 +183,11 @@ export function Navbar({
       </div>
 
       {/* Click outside to close dropdowns */}
-      {(cryptoOpen || timeframeOpen) && (
+      {(assetOpen || timeframeOpen) && (
         <div
           className="fixed inset-0 z-40"
           onClick={() => {
-            setCryptoOpen(false)
+            setAssetOpen(false)
             setTimeframeOpen(false)
           }}
         />
