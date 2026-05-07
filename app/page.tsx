@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useEffect, useState } from "react"
 import { ArrowLeft, Loader2, CircleArrowUp, CircleArrowDown } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Navbar } from "@/components/navbar"
 
 type Row = {
   id: string
@@ -116,9 +117,17 @@ export default function DextripMartingale() {
   const filteredLadderCount = new Set(filteredTrades.map((trade: any) => trade.roundId)).size
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] p-4 font-sans text-white md:p-8">
-      <div></div>
-      <div className="mx-auto max-w-6xl space-y-6">
+    <div className="min-h-screen bg-[#0a0a0a] font-sans text-white">
+      <Navbar
+        selectedCrypto="BTC"
+        selectedTimeframe="5m"
+        onCryptoChange={(crypto) => console.log("Selected crypto:", crypto)}
+        onTimeframeChange={(timeframe) => console.log("Selected timeframe:", timeframe)}
+        walletConnected={data?.wallet?.connected}
+        walletAddress={data?.wallet?.wallet}
+        onConnectWallet={() => console.log("Connect wallet clicked")}
+      />
+      <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-8">
         <div className="rounded-3xl border border-[#222222] bg-[#121212] overflow-hidden shadow-2xl">
           <div className="p-6 md:p-8 space-y-8">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
