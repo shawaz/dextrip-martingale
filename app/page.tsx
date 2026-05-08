@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useEffect, useState } from "react"
-import { ArrowLeft, Loader2, CircleArrowUp, CircleArrowDown } from "lucide-react"
+import { ArrowLeft, Loader2, CircleArrowUp, CircleArrowDown, Settings, Bolt } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Navbar } from "@/components/navbar"
 
@@ -19,6 +19,7 @@ type Row = {
   profit: number
   liveProfit?: number
   loss: number
+  balance: number
   capital: number
   ladder: number[]
   status: "idle" | "active" | "broken" | "ready"
@@ -34,6 +35,9 @@ export default function DextripMartingale() {
   const [targetValue, setTargetValue] = useState("5")
   const [multiplierValue, setMultiplierValue] = useState("3")
   const [stepsValue, setStepsValue] = useState("8")
+  const [showSettings, setShowSettings] = useState(false)
+  const [settingsLoading, setSettingsLoading] = useState(false)
+  const [trendThresholdValue, setTrendThresholdValue] = useState("8")
   const [tradeFilter, setTradeFilter] = useState("")
   const [streakFilter, setStreakFilter] = useState("all")
   const [directionFilter, setDirectionFilter] = useState("all")
@@ -74,9 +78,15 @@ export default function DextripMartingale() {
       const res = await fetch("/api/btc-5m")
       const json = await res.json()
       setData(json)
-      if (json?.targetProfit) setTargetValue(String(json.targetProfit))
-      if (json?.multiplier) setMultiplierValue(String(json.multiplier))
-      if (json?.ladderSteps) setStepsValue(String(json.ladderSteps))
+      // Use display values when pending restart (current settings, not snapshot)
+      if (json?.displayTargetProfit != null) setTargetValue(String(json.displayTargetProfit))
+      else if (json?.targetProfit) setTargetValue(String(json.targetProfit))
+      if (json?.displayMultiplier != null) setMultiplierValue(String(json.displayMultiplier))
+      else if (json?.multiplier) setMultiplierValue(String(json.multiplier))
+      if (json?.displayLadderSteps != null) setStepsValue(String(json.displayLadderSteps))
+      else if (json?.ladderSteps) setStepsValue(String(json.ladderSteps))
+      if (json?.displayTrendThreshold != null) setTrendThresholdValue(String(json.displayTrendThreshold))
+      else if (json?.trendStrengthThreshold != null) setTrendThresholdValue(String(json.trendStrengthThreshold))
       setLoading(false)
     }
 
@@ -151,6 +161,31 @@ export default function DextripMartingale() {
                     <span className="text-[9px] uppercase tracking-tighter text-zinc-600 font-bold mt-1">RSI (14)</span>
                   </div>
                 )}
+                {data?.trend && (
+                  <div className="flex flex-col items-center">
+                    <div className={cn("rounded-lg border px-3 py-2 min-w-[70px] text-center",
+                      data.trend.direction === "up" ? "bg-emerald-500/10 border-emerald-500/30" :
+                      data.trend.direction === "down" ? "bg-red-500/10 border-red-500/30" :
+                      "bg-zinc-900 border-zinc-800"
+                    )}>
+                      <span className={cn("text-lg font-bold font-mono",
+                        data.trend.direction === "up" ? "text-emerald-400" :
+                        data.trend.direction === "down" ? "text-red-400" :
+                        "text-zinc-400"
+                      )}>
+                        {data.trend.direction === "up" ? "UP" : data.trend.direction === "down" ? "DOWN" : "—"}
+                      </span>
+                      <span className="text-[11px] font-mono text-zinc-500 ml-1">
+                        {data.trend.strength}
+                      </span>
+                    </div>
+                    <span className="text-[9px] uppercase tracking-tighter text-zinc-600 font-bold mt-1">
+                      {data.trend.strength >= (data.trendStrengthThreshold ?? 8)
+                        ? `TREND ≥${data.trendStrengthThreshold ?? 8}`
+                        : `TREND <${data.trendStrengthThreshold ?? 8}`}
+                    </span>
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <div className="flex flex-col items-center">
                     <div className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 min-w-[50px] text-center">
@@ -202,64 +237,33 @@ export default function DextripMartingale() {
             </div>
 
             <div className="flex items-center gap-3">
-              <span className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest">Base Target:</span>
-              <div className="flex items-center bg-[#1a1a1a] border border-[#222222] rounded-lg px-2 py-2">
-                <span className="text-zinc-500 text-xs font-mono mr-2">$</span>
-                <input
-                  type="number"
-                  value={targetValue}
-                  onChange={async (e) => {
-                    const val = e.target.value
-                    setTargetValue(val)
-                    const num = Number(val)
-                    if (num > 0) {
-                      const res = await fetch(`/api/btc-5m?target=${num}&multiplier=${multiplierValue}&steps=${stepsValue}`)
-                      setData(await res.json())
-                    }
-                  }}
-                  className="bg-transparent border-none focus:outline-none text-white text-xs font-mono w-12"
-                />
+              <div className="flex items-center gap-2 text-xs text-zinc-500 font-mono">
+                <span>${targetValue}</span>
+                <span className="text-zinc-700">|</span>
+                <span>{multiplierValue}x</span>
+                <span className="text-zinc-700">|</span>
+                <span>{stepsValue} steps</span>
               </div>
 
-              <span className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest ml-2">Multiplier:</span>
-              <div className="flex items-center bg-[#1a1a1a] border border-[#222222] rounded-lg px-2 py-2">
-                <input
-                  type="number"
-                  step="0.1"
-                  value={multiplierValue}
-                  onChange={async (e) => {
-                    const val = e.target.value
-                    setMultiplierValue(val)
-                    const num = Number(val)
-                    if (num > 1) {
-                      const res = await fetch(`/api/btc-5m?target=${targetValue}&multiplier=${num}&steps=${stepsValue}`)
-                      setData(await res.json())
-                    }
-                  }}
-                  className="bg-transparent border-none focus:outline-none text-white text-xs font-mono w-10"
-                />
-                <span className="text-zinc-500 text-xs font-mono ml-1">x</span>
-              </div>
+              <button
+                onClick={async () => {
+                  if (confirm("Are you sure you want to reset all data? This will clear all paper trade history.")) {
+                    const res = await fetch("/api/btc-5m?reset=true")
+                    setData(await res.json())
+                  }
+                }}
+                className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs font-bold uppercase tracking-widest text-red-400 hover:bg-red-500/10 transition-colors"
+              >
+                Reset
+              </button>
 
-              <span className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest ml-2">Steps:</span>
-              <div className="flex items-center bg-[#1a1a1a] border border-[#222222] rounded-lg px-2 py-2">
-                <input
-                  type="number"
-                  min="2"
-                  max="20"
-                  value={stepsValue}
-                  onChange={async (e) => {
-                    const val = e.target.value
-                    setStepsValue(val)
-                    const num = Number(val)
-                    if (num >= 2 && num <= 20) {
-                      const res = await fetch(`/api/btc-5m?target=${targetValue}&multiplier=${multiplierValue}&steps=${num}`)
-                      setData(await res.json())
-                    }
-                  }}
-                  className="bg-transparent border-none focus:outline-none text-white text-xs font-mono w-8"
-                />
-              </div>
+              <button
+                onClick={() => setShowSettings(true)}
+                className="flex items-center gap-2 rounded-lg border border-[#222222] bg-[#1a1a1a] px-3 py-2 text-xs font-bold uppercase tracking-widest text-zinc-400 hover:text-white hover:border-zinc-600 transition-colors"
+              >
+                <Bolt className="w-3.5 h-3.5" />
+              </button>
+
             </div>
           </div>
 
@@ -283,18 +287,24 @@ export default function DextripMartingale() {
 
             </>
           ) : (
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="grid grid-cols-3 gap-3 md:grid-cols-3">
               {[
+                { label: "Earnings", value: `$${Number(stats.balance).toFixed(2)}`, cayan: true },
+                { label: "Invested", value: `$${Number(stats.invested).toFixed(2)}`, warning: true },
                 { label: "Total Capital", value: `$${Number(stats.capital).toFixed(2)}` },
-                { label: "Net P&L", value: `$${Number(stats.netPnl ?? stats.portfolio).toFixed(2)}`, cayan: true },
-                { label: "Invested", value: `$${Number(stats.invested).toFixed(2)}`, danger: true },
-                { label: "Win Rate", value: `${Number(stats.winRate ?? 0).toFixed(1)}%`, emerald: true },
+
               ].map((stat) => (
                 <div key={stat.label} className="rounded-xl border border-[#222222] bg-[#121212] p-4">
                   <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">{stat.label}</div>
-                  <div className={cn("mt-2 text-xl font-semibold", stat.danger ? "text-red-400" : stat.cayan ? "text-cyan-400" : stat.emerald ? "text-emerald-400" : "text-white")}>{stat.value}</div>
+                  <div className={cn("mt-2 text-xl font-semibold", stat.warning ? "text-amber-400" : stat.cayan ? "text-emerald-400" : "text-white")}>{stat.value}</div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {data?.pendingRestart && (
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-400 font-mono">
+              New settings will take effect after the current candle closes
             </div>
           )}
 
@@ -318,11 +328,10 @@ export default function DextripMartingale() {
                   <th className="px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Rounds</th>
                   <th className="px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Streak</th>
                   <th className="px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Direction</th>
-                  <th className="px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Status</th>
                   <th className="px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Ladder</th>
-                  <th className="px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Returns</th>
                   <th className="px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Invested</th>
-                  <th className="px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Profit</th>
+                  <th className="px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Returns</th>
+                  {activeTab === "paper" ? <th className="px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Balance</th> : null}
                   {activeTab === "live" ? <th className="px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Live</th> : null}
                 </tr>
               </thead>
@@ -333,20 +342,6 @@ export default function DextripMartingale() {
 
                     <td className="px-4 py-4 font-semibold text-zinc-100">{row.name.replace(/\s+(UP|DOWN)$/i, "")}</td>
                     <td className="px-4 py-4 text-zinc-300">{row.direction}</td>
-                    <td className="px-4 py-4">
-                      <span className={cn(
-                        "inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-tighter",
-                        row.status === "broken"
-                          ? "bg-red-500/10 text-red-400"
-                          : row.status === "active"
-                            ? "bg-emerald-500/10 text-emerald-400"
-                            : row.triggerActive
-                              ? "bg-cyan-500/10 text-cyan-400"
-                              : "bg-zinc-800 text-zinc-400"
-                      )}>
-                        {row.status === "active" ? "active" : row.triggerActive ? "armed" : row.status === "broken" ? "broken" : "idle"}
-                      </span>
-                    </td>
                     <td className="px-4 py-4 text-zinc-400">
                       <div className="flex flex-wrap gap-2">
                         {row.ladder.map((value, index) => (
@@ -366,31 +361,19 @@ export default function DextripMartingale() {
                         ))}
                       </div>
                     </td>
+                    <td className="px-4 py-4 font-mono text-amber-400">${Number(activeTab === "live" ? row.liveInvested ?? 0 : row.invested).toFixed(2)}</td>
                     <td className="px-4 py-4 font-mono text-cyan-400">${(() => {
-                      // Returns = net return if current trade wins
-                      // Step 1: stake - 0 = stake
-                      // Step 2: stake2 - stake1
-                      // Step 3: stake3 - (stake1 + stake2)
                       const ladder = row.ladder;
-                      const currentStep = row.currentStep;
-                      
-                      // Idle / reset → show step 1 returns
-                      if (currentStep <= 0) {
-                        return ladder[0].toFixed(2);
-                      }
-                      
-                      // Broken (step beyond ladder) → show 0
-                      if (currentStep > ladder.length) {
-                        return "0.00";
-                      }
-                      
-                      // Active step
-                      const currentStake = ladder[currentStep - 1];
-                      const previousStakes = ladder.slice(0, currentStep - 1).reduce((a, b) => a + b, 0);
+                      const step = row.currentStep;
+                      if (step <= 0) return ladder[0].toFixed(2);
+                      if (step > ladder.length) return "0.00";
+                      const currentStake = ladder[step - 1];
+                      const previousStakes = ladder.slice(0, step - 1).reduce((a, b) => a + b, 0);
                       return (currentStake - previousStakes).toFixed(2);
                     })()}</td>
-                    <td className="px-4 py-4 font-mono text-red-400">${Number(activeTab === "live" ? row.liveInvested ?? 0 : row.invested).toFixed(2)}</td>
-                    <td className="px-4 py-4 font-mono text-emerald-400">${Number(activeTab === "live" ? row.liveProfit ?? 0 : row.profit).toFixed(2)}</td>
+                    {activeTab === "paper" ? (
+                      <td className="px-4 py-4 font-mono text-white">${(row.balance ?? 0).toFixed(2)}</td>
+                    ) : null}
                     {activeTab === "live" ? (
                       <td className="px-4 py-4">
                         <button
@@ -515,6 +498,131 @@ export default function DextripMartingale() {
           </div>
         )}
       </div>
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setShowSettings(false)}>
+          <div className="rounded-2xl border border-[#333] bg-[#1a1a1a] p-6 w-full max-w-sm shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-bold text-white mb-6">Settings</h2>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-2 block">Base Target</label>
+                <div className="flex items-center bg-[#0a0a0a] border border-[#333] rounded-lg px-3 py-2.5">
+                  <span className="text-zinc-500 text-sm font-mono mr-2">$</span>
+                  <input
+                    type="number"
+                    value={targetValue}
+                    onChange={(e) => setTargetValue(e.target.value)}
+                    className="bg-transparent border-none focus:outline-none text-white text-sm font-mono w-full"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-2 block">Multiplier</label>
+                <div className="flex items-center bg-[#0a0a0a] border border-[#333] rounded-lg px-3 py-2.5">
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={multiplierValue}
+                    onChange={(e) => setMultiplierValue(e.target.value)}
+                    className="bg-transparent border-none focus:outline-none text-white text-sm font-mono w-full"
+                  />
+                  <span className="text-zinc-500 text-sm font-mono ml-1">x</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-2 block">Steps</label>
+                <div className="flex items-center bg-[#0a0a0a] border border-[#333] rounded-lg px-3 py-2.5">
+                  <input
+                    type="number"
+                    min="2"
+                    max="20"
+                    value={stepsValue}
+                    onChange={(e) => setStepsValue(e.target.value)}
+                    className="bg-transparent border-none focus:outline-none text-white text-sm font-mono w-full"
+                  />
+                </div>
+              </div>
+
+              <div className="bg-[#0a0a0a] border border-[#333] rounded-lg px-3 py-3">
+                <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Preview Ladder</span>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {(() => {
+                    const t = Number(targetValue) || 5
+                    const m = Number(multiplierValue) || 3
+                    const s = Number(stepsValue) || 8
+                    const lad: number[] = []
+                    let cur = t
+                    for (let i = 0; i < s; i++) {
+                      lad.push(Math.max(1, Math.round(cur)))
+                      cur *= m
+                    }
+                    return lad.map((v, i) => (
+                      <span key={i} className="rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-[10px] font-bold text-zinc-400">
+                        ${v}
+                      </span>
+                    ))
+                  })()}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-2 block">Trend Threshold (0-20)</label>
+                <div className="flex items-center bg-[#0a0a0a] border border-[#333] rounded-lg px-3 py-2.5">
+                  <input
+                    type="number"
+                    min="0"
+                    max="20"
+                    step="0.5"
+                    value={trendThresholdValue}
+                    onChange={(e) => setTrendThresholdValue(e.target.value)}
+                    className="bg-transparent border-none focus:outline-none text-white text-sm font-mono w-full"
+                  />
+                </div>
+                <div className="flex items-center gap-2 mt-2">
+                  <div className={cn("h-1.5 rounded-full flex-1", Number(trendThresholdValue) >= 8 ? "bg-zinc-700" : "bg-zinc-800")}>
+                    <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-amber-500 to-red-500 transition-all" style={{ width: `${Math.min(100, (Number(trendThresholdValue) || 0) * 5)}%` }} />
+                  </div>
+                  <span className="text-[10px] font-mono text-zinc-500 min-w-[20px] text-right">{trendThresholdValue}</span>
+                </div>
+                <p className="text-[10px] text-zinc-600 mt-1">Higher = less sensitive to trend. Set to 0 to disable.</p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setShowSettings(false)}
+                className="flex-1 rounded-lg border border-[#333] bg-transparent py-2.5 text-xs font-bold uppercase tracking-widest text-zinc-400 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setSettingsLoading(true)
+                  const target = Number(targetValue)
+                  const multiplier = Number(multiplierValue)
+                  const steps = Number(stepsValue)
+                  const trendThreshold = Number(trendThresholdValue)
+                  if (target > 0 && multiplier > 1 && steps >= 2 && steps <= 20) {
+                    await fetch(`/api/btc-5m?target=${target}&multiplier=${multiplier}&steps=${steps}&trendThreshold=${trendThreshold}&applyNextWindow=true`)
+                    const res = await fetch("/api/btc-5m")
+                    setData(await res.json())
+                    setShowSettings(false)
+                  }
+                  setSettingsLoading(false)
+                }}
+                disabled={settingsLoading}
+                className="flex-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 py-2.5 text-xs font-bold uppercase tracking-widest text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+              >
+                {settingsLoading ? "Saving..." : "Confirm"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -13,10 +13,12 @@ export type MarketState = {
   vwapDistancePct: number;
   breakout: boolean;
   liquiditySweep: boolean;
+  emaSlope: 1 | 0 | -1;
+  lowVolume: boolean;
 };
 
 export async function buildMarketState(price: number): Promise<MarketState> {
-  const response = await fetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=20");
+  const response = await fetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=30");
   const candles = (await response.json()) as Array<[number, string, string, string, string, string]>;
   const closes = candles.map((row) => Number(row[4]));
   const volumes = candles.map((row) => Number(row[5]));
@@ -48,6 +50,30 @@ export async function buildMarketState(price: number): Promise<MarketState> {
   const liquiditySweep = Math.abs(vwapDistancePct) > 0.6 && breakout;
   const regime = breakout && volumeExpansion > 1.35 ? "breakout" : volatilityLevel === "high" && trendDirection === "flat" ? "chaos" : trendDirection === "flat" ? "range" : "trend";
 
+  // 21-period EMA slope
+  const emaPeriod = 21;
+  const emaMultiplier = 2 / (emaPeriod + 1);
+  function computeEma(data: number[]): number[] {
+    const result: number[] = [];
+    for (let i = 0; i < data.length; i++) {
+      if (i < emaPeriod) {
+        const slice = data.slice(0, i + 1);
+        result.push(slice.reduce((s, v) => s + v, 0) / slice.length);
+      } else {
+        result.push(data[i] * emaMultiplier + result[i - 1] * (1 - emaMultiplier));
+      }
+    }
+    return result;
+  }
+  const emaValues = computeEma(closes);
+  const emaRecent = emaValues.slice(-3);
+  const emaSlope: 1 | 0 | -1 = emaRecent.length >= 3
+    ? (emaRecent[2] > emaRecent[0] && ((emaRecent[2] - emaRecent[0]) / (emaRecent[0] || 1)) * 100 > 0.01 ? 1
+      : emaRecent[2] < emaRecent[0] && ((emaRecent[0] - emaRecent[2]) / (emaRecent[0] || 1)) * 100 > 0.01 ? -1
+      : 0)
+    : 0;
+  const lowVolume = volumeExpansion < 0.5;
+
   return {
     price,
     trendDirection,
@@ -59,6 +85,8 @@ export async function buildMarketState(price: number): Promise<MarketState> {
     vwapDistancePct,
     breakout,
     liquiditySweep,
+    emaSlope,
+    lowVolume,
   };
 }
 

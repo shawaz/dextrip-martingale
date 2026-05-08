@@ -1,2 +1,1 @@
-web: npm run start
-worker: node worker.js
+worker: npx tsx scripts/paper-trading-bot.ts

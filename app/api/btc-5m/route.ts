@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { db, agents, rounds, trades, settings, walletBalances } from "@/db/index"
 import { eq, and, desc, lt } from "drizzle-orm"
 import { buildLadder, replayStreakMachine } from "@/lib/trading/streak-machine"
+import { buildMarketState, type MarketState } from "@/lib/trading/local-selection"
 
 async function getSetting(key: string, fallback: number): Promise<number> {
   try {
@@ -23,6 +24,10 @@ async function getMultiplier() {
 
 async function getLadderSteps() {
   return getSetting("martingale_ladder_steps", 8)
+}
+
+async function getTrendStrengthThreshold() {
+  return getSetting("trend_strength_threshold", 8)
 }
 
 function calculateRsi(closes: number[], period = 14): number | null {
@@ -125,73 +130,141 @@ async function getWalletBalance() {
 }
 
 export async function GET(req: Request) {
+  // Fire-and-forget keep-alive ping to Railway bot
+  fetch("https://loving-rejoicing-production-592c.up.railway.app", { method: "HEAD", signal: AbortSignal.timeout(5000) }).catch(() => {})
+
   try {
     const { searchParams } = new URL(req.url)
     const shouldReset = searchParams.get("reset") === "true"
+    const applyNext = searchParams.get("applyNextWindow") === "true"
     const newTarget = searchParams.get("target")
     const newMultiplier = searchParams.get("multiplier")
     const newSteps = searchParams.get("steps")
     const toggleAgent = searchParams.get("toggleLive")
     const toggleEnabled = searchParams.get("liveEnabled") === "true"
 
-    if (shouldReset) {
-      const existingAgents = await db().select().from(agents).where(eq(agents.timeframe, "5m"))
-      for (const agent of existingAgents) {
-        await db().delete(trades).where(eq(trades.agentId, agent.id))
+    // Save settings for next window (no data deletion)
+    if (applyNext) {
+      const now = new Date().toISOString()
+      const saveSetting = async (key: string, value: string) => {
+        await db().insert(settings).values({ key, value, updatedAt: now }).onConflictDoUpdate({
+          target: settings.key,
+          set: { value, updatedAt: now },
+        })
       }
+      // Snapshot current settings before overwriting (so API still displays old ladder)
+      const currentTarget = await getTargetProfit()
+      const currentMultiplier = await getMultiplier()
+      const currentSteps = await getLadderSteps()
+      await saveSetting("pending_old_target_profit", String(currentTarget))
+      await saveSetting("pending_old_multiplier", String(currentMultiplier))
+      await saveSetting("pending_old_steps", String(currentSteps))
+      // Save new settings
+      if (newTarget) { const val = Number(newTarget); if (!Number.isNaN(val) && val > 0) await saveSetting("martingale_target_profit", String(val)) }
+      if (newMultiplier) { const val = Number(newMultiplier); if (!Number.isNaN(val) && val > 1) await saveSetting("martingale_multiplier", String(val)) }
+      if (newSteps) { const val = Number(newSteps); if (!Number.isNaN(val) && val >= 2 && val <= 20) await saveSetting("martingale_ladder_steps", String(val)) }
+      const newTrendThreshold = searchParams.get("trendThreshold")
+      if (newTrendThreshold) { const val = Number(newTrendThreshold); if (!Number.isNaN(val) && val >= 0 && val <= 20) await saveSetting("trend_strength_threshold", String(val)) }
+      await saveSetting("pending_ladder_restart", "true")
+    }
+
+    if (shouldReset) {
+      // Clear ALL paper trades and related rounds to ensure consistency
+      await db().delete(trades).where(eq(trades.tradeMode, "paper"))
       await db().delete(rounds).where(eq(rounds.timeframe, "5m"))
-      await db().delete(agents).where(eq(agents.timeframe, "5m"))
+      
+      // Reset agent stats
+      await db().update(agents).set({
+        won: 0,
+        loss: 0,
+        winRate: 0,
+        totalPnl: 0,
+        dailyPnl: 0,
+        maxDrawdown: 0,
+        bankroll: 1000,
+        updatedAt: new Date().toISOString()
+      }).where(eq(agents.timeframe, "5m"))
+
+      // Only update martingale settings during a reset
+      if (newTarget) {
+        const val = Number(newTarget)
+        if (!Number.isNaN(val) && val > 0) {
+          await db().insert(settings).values({
+            key: "martingale_target_profit",
+            value: String(val),
+            updatedAt: new Date().toISOString(),
+          }).onConflictDoUpdate({
+            target: settings.key,
+            set: { value: String(val), updatedAt: new Date().toISOString() },
+          })
+        }
+      }
+
+      if (newMultiplier) {
+        const val = Number(newMultiplier)
+        if (!Number.isNaN(val) && val > 1) {
+          await db().insert(settings).values({
+            key: "martingale_multiplier",
+            value: String(val),
+            updatedAt: new Date().toISOString(),
+          }).onConflictDoUpdate({
+            target: settings.key,
+            set: { value: String(val), updatedAt: new Date().toISOString() },
+          })
+        }
+      }
+
+      if (newSteps) {
+        const val = Number(newSteps)
+        if (!Number.isNaN(val) && val >= 2 && val <= 20) {
+          await db().insert(settings).values({
+            key: "martingale_ladder_steps",
+            value: String(val),
+            updatedAt: new Date().toISOString(),
+          }).onConflictDoUpdate({
+            target: settings.key,
+            set: { value: String(val), updatedAt: new Date().toISOString() },
+          })
+        }
+      }
+
+      const newTrendThreshold = searchParams.get("trendThreshold")
+      if (newTrendThreshold) {
+        const val = Number(newTrendThreshold)
+        if (!Number.isNaN(val) && val >= 0 && val <= 20) {
+          await db().insert(settings).values({
+            key: "trend_strength_threshold",
+            value: String(val),
+            updatedAt: new Date().toISOString(),
+          }).onConflictDoUpdate({
+            target: settings.key,
+            set: { value: String(val), updatedAt: new Date().toISOString() },
+          })
+        }
+      }
     }
 
     if (toggleAgent) {
       await toggleLiveAgent(toggleAgent, toggleEnabled)
     }
 
-    if (newTarget) {
-      const val = Number(newTarget)
-      if (!Number.isNaN(val) && val > 0) {
-        await db().insert(settings).values({
-          key: "martingale_target_profit",
-          value: String(val),
-          updatedAt: new Date().toISOString(),
-        }).onConflictDoUpdate({
-          target: settings.key,
-          set: { value: String(val), updatedAt: new Date().toISOString() },
-        })
-      }
-    }
+    // Remove the old settings update logic that was outside the shouldReset block
+    // (This part is handled by the replace tool's context)
 
-    if (newMultiplier) {
-      const val = Number(newMultiplier)
-      if (!Number.isNaN(val) && val > 1) {
-        await db().insert(settings).values({
-          key: "martingale_multiplier",
-          value: String(val),
-          updatedAt: new Date().toISOString(),
-        }).onConflictDoUpdate({
-          target: settings.key,
-          set: { value: String(val), updatedAt: new Date().toISOString() },
-        })
-      }
-    }
+    const pendingRestartSetting = await db().query.settings.findFirst({ where: eq(settings.key, "pending_ladder_restart") })
+    const pendingRestart = pendingRestartSetting?.value === "true"
 
-    if (newSteps) {
-      const val = Number(newSteps)
-      if (!Number.isNaN(val) && val >= 2 && val <= 20) {
-        await db().insert(settings).values({
-          key: "martingale_ladder_steps",
-          value: String(val),
-          updatedAt: new Date().toISOString(),
-        }).onConflictDoUpdate({
-          target: settings.key,
-          set: { value: String(val), updatedAt: new Date().toISOString() },
-        })
-      }
-    }
+    // Use snapshot settings while restart is pending (so old trades display correctly)
+    const targetProfit = pendingRestart
+      ? Number((await db().query.settings.findFirst({ where: eq(settings.key, "pending_old_target_profit") }))?.value ?? await getTargetProfit())
+      : await getTargetProfit()
+    const multiplier = pendingRestart
+      ? Number((await db().query.settings.findFirst({ where: eq(settings.key, "pending_old_multiplier") }))?.value ?? await getMultiplier())
+      : await getMultiplier()
+    const ladderSteps = pendingRestart
+      ? Number((await db().query.settings.findFirst({ where: eq(settings.key, "pending_old_steps") }))?.value ?? await getLadderSteps())
+      : await getLadderSteps()
 
-    const targetProfit = await getTargetProfit()
-    const multiplier = await getMultiplier()
-    const ladderSteps = await getLadderSteps()
     const wallet = await getWalletBalance()
     let dbBalance = 0
     try {
@@ -199,6 +272,12 @@ export async function GET(req: Request) {
       if (wb[0]) dbBalance = Number(wb[0].usdcBalance ?? 0)
     } catch {}
     const ladder = buildLadder(targetProfit, multiplier, ladderSteps)
+    const trendThreshold = await getTrendStrengthThreshold()
+    // Always return the current (committed) settings for display, separate from active snapshot
+    const displayTargetProfit = await getTargetProfit()
+    const displayMultiplier = await getMultiplier()
+    const displayLadderSteps = await getLadderSteps()
+    const displayTrendThreshold = await getTrendStrengthThreshold()
 
     await seedAgents()
 
@@ -229,6 +308,42 @@ export async function GET(req: Request) {
       console.error("[API] Failed to fetch BTC price:", e)
     }
     const rsi = calculateRsi(currentPrice > 0 ? [...recentCloses, currentPrice] : recentCloses, 14)
+
+    // Ensure currentPrice is a valid number (Binance response could give NaN)
+    if (!currentPrice || isNaN(currentPrice)) {
+      currentPrice = recentCloses.at(-1) ?? 0;
+    }
+
+    let marketState: MarketState | null = null;
+    try {
+      marketState = await buildMarketState(currentPrice);
+    } catch (e) {
+      console.warn("[API] Failed to build market state from Binance, computing from 5m closes:", e);
+    }
+
+    // Fallback: compute from existing 5m close data if buildMarketState failed
+    if (!marketState && recentCloses.length > 2) {
+      const prevIndex = Math.min(5, recentCloses.length - 1);
+      const prevPrice = recentCloses[recentCloses.length - prevIndex] ?? currentPrice;
+      const priceMovePct = prevPrice ? ((currentPrice - prevPrice) / prevPrice) * 100 : 0;
+      const trendDirection = priceMovePct > 0.25 ? "up" : priceMovePct < -0.25 ? "down" : "flat";
+      const trendStrength = Math.min(20, Math.abs(priceMovePct) * 8);
+      const regime = trendDirection === "flat" ? "range" : "trend";
+      marketState = {
+        price: currentPrice,
+        trendDirection,
+        trendStrength: isNaN(trendStrength) ? 0 : Number(trendStrength.toFixed(1)),
+        volatilityLevel: Math.abs(priceMovePct) > 1 ? "high" : Math.abs(priceMovePct) > 0.35 ? "medium" : "low",
+        regime,
+        volumeExpansion: 1,
+        rsiZone: rsi != null ? (rsi <= 35 ? "oversold" : rsi >= 65 ? "overbought" : "neutral") : "neutral",
+        vwapDistancePct: 0,
+        breakout: false,
+        liquiditySweep: false,
+        emaSlope: 0,
+        lowVolume: false,
+      };
+    }
 
     const recentDirections = closedRounds
       .map((round) => round.resolvedDirection)
@@ -293,7 +408,28 @@ export async function GET(req: Request) {
       const liveRealizedLoss = liveAgentTrades.reduce((sum, trade) => sum + Math.abs(Math.min(0, Number(trade.pnl ?? 0))), 0)
       const balance = state.realizedProfit - state.realizedLoss
       const streakSignal = (streak as any).streak ? getStreakSignal((streak as any).streak) : null
-      const triggerActive =
+
+      let trendBlocksSignal = false;
+      if (marketState) {
+        if (streak.trigger === "always") {
+          if (marketState.lowVolume) {
+            trendBlocksSignal = true;
+          } else if (
+            (streak.direction === "UP" && marketState.emaSlope === -1) ||
+            (streak.direction === "DOWN" && marketState.emaSlope === 1)
+          ) {
+            trendBlocksSignal = true;
+          }
+        } else if (streakSignal != null) {
+          if (marketState.lowVolume) {
+            trendBlocksSignal = true;
+          } else if (marketState.regime === "trend" && marketState.trendStrength >= trendThreshold) {
+            trendBlocksSignal = true;
+          }
+        }
+      }
+
+      const triggerActive = trendBlocksSignal ? false :
         streak.trigger === "always" ? true :
         streakSignal != null ? true :
         streak.trigger === "rsi" ? (rsi != null && (rsi <= 30 || rsi >= 80)) : false
@@ -350,9 +486,11 @@ export async function GET(req: Request) {
     const totalProfits = rows.reduce((sum, row) => sum + row.profit, 0)
     const totalLosses = rows.reduce((sum, row) => sum + row.loss, 0)
     const totalInvested = rows.reduce((sum, row) => sum + row.invested, 0)
-    const totalBalance = rows.reduce((sum, row) => sum + row.balance, 0)
     const totalStartingCapital = rows.reduce((sum, row) => sum + (row.capital - row.balance), 0)
-    const netPnl = totalProfits - totalLosses
+    // Balance = Profit - Loss - Invested (money you actually have)
+    const balance = totalProfits - totalLosses - totalInvested
+    // Total Capital = Starting Capital + Balance
+    const totalCapital = totalStartingCapital + balance
     const totalWins = rows.reduce((sum, row) => sum + (row.profit > 0 ? Math.round(row.profit / targetProfit) : 0), 0)
     const totalTrades = rows.reduce((sum, row) => sum + row.roundsCompleted, 0)
     
@@ -386,7 +524,20 @@ export async function GET(req: Request) {
             .reduce((sum, t) => sum + (t.result === "won" ? targetProfit : -Number(t.stake)), 0)
           return { ...trade, windowLabel, ladderStage, tradeProfit, closedStage, runningBalance }
         }),
+        pendingRestart,
+        displayTargetProfit,
+        displayMultiplier,
+        displayLadderSteps,
+        displayTrendThreshold,
         rsi,
+        trend: marketState ? {
+          direction: marketState.trendDirection,
+          strength: marketState.trendStrength != null && !isNaN(marketState.trendStrength) ? Number(marketState.trendStrength.toFixed(1)) : 0,
+          regime: marketState.regime,
+          emaSlope: marketState.emaSlope,
+          lowVolume: marketState.lowVolume,
+        } : null,
+        trendStrengthThreshold: trendThreshold,
         targetProfit,
         multiplier,
         ladderSteps,
@@ -403,9 +554,8 @@ export async function GET(req: Request) {
           invested: totalInvested,
           profits: totalProfits,
           losses: totalLosses,
-          capital: totalStartingCapital + totalBalance,
-          portfolio: totalBalance,
-          netPnl: netPnl,
+          capital: totalCapital,
+          balance: balance,
           winRate: totalTrades > 0 ? (totalWins / totalTrades) * 100 : 0,
           totalWins: totalWins,
           totalTrades: totalTrades,

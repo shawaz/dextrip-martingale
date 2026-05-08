@@ -1,7 +1,9 @@
+import http from "node:http";
 import { db, agents, rounds, trades, settings } from "@/db/index";
 import { eq, and, desc, lt } from "drizzle-orm";
-import { buildLadder } from "@/lib/trading/streak-machine";
+import { buildLadder, replayStreakMachine } from "@/lib/trading/streak-machine";
 import { sendTradeAlert, sendSummary, sendTelegramMessage, isTelegramEnabled } from "@/lib/telegram/bot";
+import { buildMarketState, type MarketState } from "@/lib/trading/local-selection";
 
 const STREAK_AGENTS = [
   // Always-trade agents with streak (not mean reversion)
@@ -34,6 +36,10 @@ async function getMultiplier() {
 
 async function getLadderSteps() {
   return getSetting("martingale_ladder_steps", 8);
+}
+
+async function getTrendStrengthThreshold() {
+  return getSetting("trend_strength_threshold", 8);
 }
 
 async function fetchBtcPrice(): Promise<number> {
@@ -119,10 +125,10 @@ async function runCycle() {
   
   const isNewWindow = windowTs !== lastProcessedWindow;
   
-  const btcPrice = await fetchBtcPrice();
-  if (btcPrice === 0) {
-    return;
-  }
+    const btcPrice = await fetchBtcPrice();
+    if (!btcPrice || isNaN(btcPrice)) {
+      return;
+    }
   
   // Resolve previous open rounds
   const openRounds = await db().select().from(rounds)
@@ -176,10 +182,28 @@ async function runCycle() {
   
   if (isNewWindow) {
     lastProcessedWindow = windowTs;
-    
+
+    // Check for pending ladder restart (settings changed, apply now)
+    const pendingSetting = await db().query.settings.findFirst({ where: eq(settings.key, "pending_ladder_restart") });
+    if (pendingSetting?.value === "true") {
+      console.log("[RESTART] Pending ladder restart detected — applying now");
+      await db().delete(trades).where(eq(trades.tradeMode, "paper"));
+      await db().delete(rounds).where(eq(rounds.timeframe, "5m"));
+      await db().update(agents).set({
+        won: 0, loss: 0, winRate: 0, totalPnl: 0, dailyPnl: 0, maxDrawdown: 0,
+        bankroll: 1000, updatedAt: new Date().toISOString(),
+      }).where(eq(agents.timeframe, "5m"));
+      await db().delete(settings).where(eq(settings.key, "pending_ladder_restart"));
+      await db().delete(settings).where(eq(settings.key, "pending_old_target_profit"));
+      await db().delete(settings).where(eq(settings.key, "pending_old_multiplier"));
+      await db().delete(settings).where(eq(settings.key, "pending_old_steps"));
+      console.log("[RESTART] Ladder restart complete — old trades cleared, new settings active");
+    }
+
     const targetProfit = await getTargetProfit();
     const multiplier = await getMultiplier();
     const ladderSteps = await getLadderSteps();
+    const trendThreshold = await getTrendStrengthThreshold();
     const ladder = buildLadder(targetProfit, multiplier, ladderSteps);
     
     console.log(`\n[${new Date().toISOString()}] New window: ${roundId} | BTC: $${btcPrice.toFixed(2)} | Target:$${targetProfit} | Multiplier:${multiplier}x | Steps:${ladderSteps}`);
@@ -219,6 +243,13 @@ async function runCycle() {
       14
     );
     
+    let marketState: MarketState | null = null;
+    try {
+      marketState = await buildMarketState(btcPrice);
+    } catch (e) {
+      console.warn("[TREND] Failed to build market state:", e);
+    }
+    
     for (const streak of STREAK_AGENTS) {
       let signal: string | null = null;
       
@@ -232,6 +263,30 @@ async function runCycle() {
         // RSI agent — only ONE direction at a time
         if (rsi != null && rsi <= 30) signal = "UP";
         else if (rsi != null && rsi >= 80) signal = "DOWN";
+      }
+      
+      // Trend filter — skip trades based on EMA slope + volume
+      if (signal && marketState) {
+        const { emaSlope, lowVolume, trendStrength, regime } = marketState;
+        if ("signal" in streak && streak.trigger === "always") {
+          if (lowVolume) {
+            console.log(`[SKIP] ${streak.id} — low volume, skipping`);
+            signal = null;
+          } else if (streak.signal === "UP" && emaSlope === -1) {
+            console.log(`[SKIP] ${streak.id} — EMA downtrend, skipping UP`);
+            signal = null;
+          } else if (streak.signal === "DOWN" && emaSlope === 1) {
+            console.log(`[SKIP] ${streak.id} — EMA uptrend, skipping DOWN`);
+            signal = null;
+          }
+        } else if ("streak" in streak && streak.streak != null) {
+          if (lowVolume) {
+            console.log(`[SKIP] ${streak.id} — low volume, skipping mean reversion`);
+            signal = null;
+          } else if (regime === "trend" && trendStrength >= trendThreshold) {
+            signal = null;
+          }
+        }
       }
       
       if (!signal) continue;
@@ -266,7 +321,8 @@ async function runCycle() {
       await sendTradeAlert("created", streak.id, roundId, signal, stake, nextStep + 1, ladder.length);
     }
 
-    console.log(`[SUMMARY] RSI:${rsi?.toFixed(1) || "N/A"} | prev:${previousDirection}`);
+    const trendLabel = marketState ? `${marketState.trendDirection}(${marketState.trendStrength.toFixed(1)})` : "N/A";
+    console.log(`[SUMMARY] RSI:${rsi?.toFixed(1) || "N/A"} | trend:${trendLabel} | threshold:${trendThreshold} | prev:${previousDirection}`);
   }
 }
 
@@ -274,32 +330,54 @@ async function sendPeriodicSummary() {
   if (!isTelegramEnabled()) return;
   try {
     const allTrades = await db().select().from(trades).where(and(eq(trades.strategyId, "streak-5m"), eq(trades.tradeMode, "paper")));
-    const totalWins = allTrades.filter((t) => t.result === "won").length;
-    const totalLosses = allTrades.filter((t) => t.result === "loss").length;
-    const totalPnl = allTrades.reduce((sum, t) => sum + Number(t.pnl || 0), 0);
+    const targetProfit = await getTargetProfit();
+    const multiplier = await getMultiplier();
+    const ladderSteps = await getLadderSteps();
+    const ladder = buildLadder(targetProfit, multiplier, ladderSteps);
 
+    let totalRealizedProfit = 0;
+    let totalRealizedLoss = 0;
+    let totalRounds = 0;
+    let totalWins = 0;
     const agentStats = [];
+
     for (const streak of STREAK_AGENTS) {
-      const agentTrades = allTrades.filter((t) => t.agentId === streak.id);
-      const profit = agentTrades.filter((t) => t.result === "won").reduce((sum, t) => sum + Number(t.pnl || 0), 0);
-      const loss = agentTrades.filter((t) => t.result === "loss").reduce((sum, t) => sum + Math.abs(Number(t.pnl || 0)), 0);
-      const pending = agentTrades.find((t) => t.result === "pending");
-      const currentStep = pending ? Math.max(1, allTrades.filter((t) => t.agentId === streak.id && t.result !== "pending").length % 8) : 0;
+      const agentTrades = allTrades
+        .filter((t) => t.agentId === streak.id)
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+      const settledTrades = agentTrades.filter((t) => t.result !== "pending");
+      const state = replayStreakMachine(
+        settledTrades.map((t) => ({
+          stake: Number(t.stake),
+          result: t.result as "won" | "loss" | "pending" | "skipped",
+          targetProfit: Number(t.targetProfitSnapshot ?? targetProfit),
+        })),
+        ladder,
+        targetProfit,
+        1000,
+      );
+
+      totalRealizedProfit += state.realizedProfit;
+      totalRealizedLoss += state.realizedLoss;
+      totalRounds += state.roundsCompleted;
+      totalWins += state.successfulCycles;
+
       agentStats.push({
         id: streak.id,
         name: streak.name,
-        profit,
-        loss,
-        balance: profit - loss,
-        currentStep,
+        profit: state.realizedProfit,
+        loss: state.realizedLoss,
+        balance: state.realizedProfit - state.realizedLoss,
+        currentStep: state.currentStep,
       });
     }
 
     await sendSummary({
-      totalTrades: allTrades.length,
+      totalTrades: totalRounds,
       totalWins,
-      totalLosses,
-      totalPnl,
+      totalLosses: totalRounds - totalWins,
+      totalPnl: totalRealizedProfit - totalRealizedLoss,
       agents: agentStats,
     });
   } catch (e) {
@@ -308,6 +386,15 @@ async function sendPeriodicSummary() {
 }
 
 async function main() {
+  const port = Number(process.env.PORT) || 8080;
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end("ok");
+  });
+  server.listen(port, () => {
+    console.log(`[HTTP] Health check server listening on port ${port}`);
+  });
+
   const targetProfit = await getTargetProfit();
   const multiplier = await getMultiplier();
   const ladderSteps = await getLadderSteps();

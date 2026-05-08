@@ -14,12 +14,13 @@ export async function GET() {
       send({ type: "connected", timestamp: Date.now() })
 
       const interval = setInterval(() => {
+        fetch("https://loving-rejoicing-production-592c.up.railway.app", { method: "HEAD", signal: AbortSignal.timeout(5000) }).catch(() => {})
         send({ type: "ping", timestamp: Date.now() })
       }, 15000)
 
       const cleanup = () => {
         clearInterval(interval)
-        controller.close()
+        try { controller.close() } catch {}
       }
 
       global.sseCleanup = cleanup

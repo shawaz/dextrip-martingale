@@ -4,6 +4,7 @@ import { useState } from "react"
 import Link from "next/link"
 import { Wallet, ChevronDown, Bitcoin, Activity } from "lucide-react"
 import { cn } from "@/lib/utils"
+import Image from "next/image"
 
 // Polymarket Event Structure
 const ASSET_OPTIONS = [
@@ -54,15 +55,15 @@ export function Navbar({
     : "Select Event"
 
   return (
-    <nav className="sticky top-0 z-50 w-full border-b border-[#222222] bg-[#0a0a0a]/95 backdrop-blur supports-[backdrop-filter]:bg-[#0a0a0a]/60">
-      <div className="mx-auto max-w-7xl">
+    <nav className=" sticky top-0 z-50 w-full  border-b border-[#222222] bg-[#0a0a0a]/95 backdrop-blur supports-[backdrop-filter]:bg-[#0a0a0a]/60">
+      <div className=" mx-auto max-w-6xl px-4 md:px-8">
         <div className="flex h-16 items-center justify-between">
           {/* Logo */}
           <div className="flex items-center gap-3">
             <Link href="/" className="flex items-center gap-2">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-cyan-500">
-                <Activity className="h-6 w-6 text-white" />
-              </div>
+
+              <Image src={'/image/logo.jpg'} alt="Logo" width={34} height={34} />
+
             </Link>
 
             {/* Asset Selector */}
@@ -145,6 +146,7 @@ export function Navbar({
                 </div>
               )}
             </div>
+
           </div>
 
           {/* Connect Wallet */}
