@@ -125,3 +125,28 @@ export async function fetchPolymarketRoundTruth(startTimeIso: string, intervalMi
     recentResults,
   };
 }
+
+export async function fetchPolymarketOutcome(roundId: string): Promise<"UP" | "DOWN" | null> {
+  const parts = roundId.split("-");
+  const ts = parts[parts.length - 1];
+  if (!ts || !/^\d+$/.test(ts)) return null;
+
+  const slug = `btc-updown-5m-${ts}`;
+  try {
+    const res = await fetch(`https://gamma-api.polymarket.com/markets/slug/${slug}`, {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const raw = await res.text();
+    const cleaned = raw.replace(/[\x00-\x1f\x7f-\x9f]/g, "");
+    const data = JSON.parse(cleaned);
+    const market = Array.isArray(data) ? data[0] : data;
+    const prices = market?.outcomePrices as string[] | undefined;
+    if (!prices || prices.length < 2) return null;
+    if (prices[0] === "1") return "UP";
+    if (prices[1] === "1") return "DOWN";
+    return null;
+  } catch {
+    return null;
+  }
+}

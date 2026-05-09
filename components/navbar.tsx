@@ -32,6 +32,8 @@ interface NavbarProps {
   walletConnected?: boolean
   walletAddress?: string
   onConnectWallet?: () => void
+  activeTab?: "paper" | "live"
+  onTabChange?: (tab: "paper" | "live") => void
 }
 
 export function Navbar({
@@ -42,6 +44,8 @@ export function Navbar({
   walletConnected = false,
   walletAddress,
   onConnectWallet,
+  activeTab = "paper",
+  onTabChange,
 }: NavbarProps) {
   const [assetOpen, setAssetOpen] = useState(false)
   const [timeframeOpen, setTimeframeOpen] = useState(false)
@@ -150,7 +154,29 @@ export function Navbar({
           </div>
 
           {/* Connect Wallet */}
-          <div className="flex items-center">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => onTabChange?.("paper")}
+              className={cn(
+                "rounded-lg border px-4 py-2 text-xs font-bold uppercase tracking-widest transition-colors",
+                activeTab === "paper"
+                  ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-400"
+                  : "border-[#222222] bg-[#121212] text-zinc-500 hover:text-zinc-300"
+              )}
+            >
+              Paper
+            </button>
+            <button
+              onClick={() => onTabChange?.("live")}
+              className={cn(
+                "rounded-lg border px-4 py-2 text-xs font-bold uppercase tracking-widest transition-colors",
+                activeTab === "live"
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                  : "border-[#222222] bg-[#121212] text-zinc-500 hover:text-zinc-300"
+              )}
+            >
+              Live
+            </button>
             <button
               onClick={onConnectWallet}
               className={cn(

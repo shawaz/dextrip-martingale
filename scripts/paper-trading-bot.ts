@@ -4,9 +4,10 @@ import { eq, and, desc, lt } from "drizzle-orm";
 import { buildLadder, replayStreakMachine } from "@/lib/trading/streak-machine";
 import { sendTradeAlert, sendSummary, sendTelegramMessage, isTelegramEnabled } from "@/lib/telegram/bot";
 import { buildMarketState, type MarketState } from "@/lib/trading/local-selection";
+import { fetchPolymarketOutcome } from "@/lib/trading/polymarket";
 
 const STREAK_AGENTS = [
-  // Always-trade agents with streak (not mean reversion)
+  // Always-trade agents
   { id: "EVERY_UP_5M", name: "Every UP", signal: "UP" as const, trigger: "always" as const },
   { id: "EVERY_DOWN_5M", name: "Every DOWN", signal: "DOWN" as const, trigger: "always" as const },
   // Mean reversion agents
@@ -149,7 +150,18 @@ async function runCycle() {
       continue;
     }
     
-    const direction = btcPrice > prevPrice ? "UP" : btcPrice < prevPrice ? "DOWN" : null;
+    let direction: string | null = null;
+    let resolutionSource = "binance";
+    try {
+      const polyDirection = await fetchPolymarketOutcome(openRound.roundId);
+      if (polyDirection) {
+        direction = polyDirection;
+        resolutionSource = "polymarket";
+      }
+    } catch {}
+    if (!direction) {
+      direction = btcPrice > prevPrice ? "UP" : btcPrice < prevPrice ? "DOWN" : null;
+    }
     
     await db().update(rounds).set({
       exitPrice: btcPrice,
@@ -162,7 +174,24 @@ async function runCycle() {
     
     for (const trade of roundTrades) {
       const won = direction && trade.signal === direction;
-      const pnl = won ? Number(trade.targetProfitSnapshot || 5) : -Number(trade.stake);
+      let pnl: number;
+      
+      if (won) {
+        // Find prior losses in this agent's current martingale cycle
+        const recentAgentTrades = await db().select().from(trades)
+          .where(and(eq(trades.agentId, trade.agentId), eq(trades.strategyId, "streak-5m")))
+          .orderBy(desc(trades.createdAt))
+          .limit(20);
+        let cycleLossSum = 0;
+        for (const t of recentAgentTrades) {
+          if (t.id === trade.id) break;
+          if (t.result === "won") break;
+          if (t.result === "loss") cycleLossSum += Number(t.stake);
+        }
+        pnl = Number(trade.stake) - cycleLossSum;
+      } else {
+        pnl = -Number(trade.stake);
+      }
       
       await db().update(trades).set({
         result: won ? "won" : "loss",
@@ -171,57 +200,55 @@ async function runCycle() {
         updatedAt: new Date().toISOString(),
       }).where(eq(trades.id, trade.id));
       
-      console.log(`[RESOLVE] ${trade.agentId} | ${openRound.roundId} | signal:${trade.signal} | actual:${direction} | result:${won ? "WON" : "LOSS"} | pnl:$${pnl.toFixed(2)}`);
+      console.log(`[RESOLVE] ${trade.agentId} | ${openRound.roundId} | signal:${trade.signal} | actual:${direction} (${resolutionSource}) | result:${won ? "WON" : "LOSS"} | pnl:$${pnl.toFixed(2)}`);
 
       // Telegram alert for resolved trade
       await sendTradeAlert("resolved", trade.agentId, openRound.roundId, trade.signal, Number(trade.stake), 0, 0, won ? "won" : "loss", pnl);
     }
     
-    console.log(`[RESOLVE] Round ${openRound.roundId} closed | direction:${direction} | entry:$${prevPrice.toFixed(2)} | exit:$${btcPrice.toFixed(2)}`);
+    console.log(`[RESOLVE] Round ${openRound.roundId} closed | direction:${direction} | src:${resolutionSource} | entry:$${prevPrice.toFixed(2)} | exit:$${btcPrice.toFixed(2)}`);
   }
   
   if (isNewWindow) {
     lastProcessedWindow = windowTs;
-
-    // Check for pending ladder restart (settings changed, apply now)
-    const pendingSetting = await db().query.settings.findFirst({ where: eq(settings.key, "pending_ladder_restart") });
-    if (pendingSetting?.value === "true") {
-      console.log("[RESTART] Pending ladder restart detected — applying now");
-      await db().delete(trades).where(eq(trades.tradeMode, "paper"));
-      await db().delete(rounds).where(eq(rounds.timeframe, "5m"));
-      await db().update(agents).set({
-        won: 0, loss: 0, winRate: 0, totalPnl: 0, dailyPnl: 0, maxDrawdown: 0,
-        bankroll: 1000, updatedAt: new Date().toISOString(),
-      }).where(eq(agents.timeframe, "5m"));
-      await db().delete(settings).where(eq(settings.key, "pending_ladder_restart"));
-      await db().delete(settings).where(eq(settings.key, "pending_old_target_profit"));
-      await db().delete(settings).where(eq(settings.key, "pending_old_multiplier"));
-      await db().delete(settings).where(eq(settings.key, "pending_old_steps"));
-      console.log("[RESTART] Ladder restart complete — old trades cleared, new settings active");
-    }
 
     const targetProfit = await getTargetProfit();
     const multiplier = await getMultiplier();
     const ladderSteps = await getLadderSteps();
     const trendThreshold = await getTrendStrengthThreshold();
     const ladder = buildLadder(targetProfit, multiplier, ladderSteps);
+
+    // Load all settings including per-agent overrides
+    const allSettings = await db().select().from(settings);
+    const settingMap: Record<string, number> = {};
+    for (const s of allSettings) {
+      const val = Number(s.value);
+      if (!Number.isNaN(val)) settingMap[s.key] = val;
+    }
+    function perAgentVal(agentId: string, key: string, fallback: number): number {
+      return settingMap[`${key}_${agentId}`] ?? fallback;
+    }
     
     console.log(`\n[${new Date().toISOString()}] New window: ${roundId} | BTC: $${btcPrice.toFixed(2)} | Target:$${targetProfit} | Multiplier:${multiplier}x | Steps:${ladderSteps}`);
     
     const existingRound = await db().query.rounds.findFirst({ where: eq(rounds.roundId, roundId) });
-    if (!existingRound) {
-      await db().insert(rounds).values({
-        id: crypto.randomUUID(),
-        roundId,
-        asset: "BTC",
-        timeframe: "5m",
-        startTime: startTimeIso,
-        endTime: endTimeIso,
-        entryPrice: btcPrice,
-        status: "open",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
+      if (!existingRound) {
+        const parts = roundId.split("-");
+        const ts = parts[parts.length - 1];
+        const slug = ts ? `btc-updown-5m-${ts}` : null;
+        await db().insert(rounds).values({
+          id: crypto.randomUUID(),
+          roundId,
+          asset: "BTC",
+          timeframe: "5m",
+          startTime: startTimeIso,
+          endTime: endTimeIso,
+          entryPrice: btcPrice,
+          status: "open",
+          externalMarketSlug: slug,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
       console.log(`[ROUND] Created ${roundId} at $${btcPrice.toFixed(2)}`);
     }
     
@@ -254,51 +281,32 @@ async function runCycle() {
       let signal: string | null = null;
       
       if ("signal" in streak && streak.trigger === "always") {
-        // Every UP / Every DOWN — always trade their fixed signal
         signal = streak.signal;
       } else if ("streak" in streak && streak.streak != null) {
-        // Previous agents — mean reversion
         signal = getStreakSignal(streak.streak);
       } else if (streak.trigger === "rsi") {
-        // RSI agent — only ONE direction at a time
         if (rsi != null && rsi <= 30) signal = "UP";
         else if (rsi != null && rsi >= 80) signal = "DOWN";
       }
       
-      // Trend filter — skip trades based on EMA slope + volume
-      if (signal && marketState) {
-        const { emaSlope, lowVolume, trendStrength, regime } = marketState;
-        if ("signal" in streak && streak.trigger === "always") {
-          if (lowVolume) {
-            console.log(`[SKIP] ${streak.id} — low volume, skipping`);
-            signal = null;
-          } else if (streak.signal === "UP" && emaSlope === -1) {
-            console.log(`[SKIP] ${streak.id} — EMA downtrend, skipping UP`);
-            signal = null;
-          } else if (streak.signal === "DOWN" && emaSlope === 1) {
-            console.log(`[SKIP] ${streak.id} — EMA uptrend, skipping DOWN`);
-            signal = null;
-          }
-        } else if ("streak" in streak && streak.streak != null) {
-          if (lowVolume) {
-            console.log(`[SKIP] ${streak.id} — low volume, skipping mean reversion`);
-            signal = null;
-          } else if (regime === "trend" && trendStrength >= trendThreshold) {
-            signal = null;
-          }
-        }
-      }
-      
       if (!signal) continue;
+
+      // Per-agent settings override globals
+      const agentTarget = perAgentVal(streak.id, "target", targetProfit);
+      const agentMultiplier = perAgentVal(streak.id, "multiplier", multiplier);
+      const agentSteps = perAgentVal(streak.id, "steps", ladderSteps);
+      const agentLadder = (agentTarget !== targetProfit || agentMultiplier !== multiplier || agentSteps !== ladderSteps)
+        ? buildLadder(agentTarget, agentMultiplier, agentSteps)
+        : ladder;
       
-      const state = await getAgentState(streak.id, ladder, targetProfit);
+      const state = await getAgentState(streak.id, agentLadder, agentTarget);
       if (state.pending) {
         console.log(`[SKIP] ${streak.id} already has pending trade`);
         continue;
       }
       
       const nextStep = Math.max(0, state.currentStep);
-      const stake = ladder[nextStep] || ladder[0];
+      const stake = agentLadder[nextStep] || agentLadder[0];
       
       await db().insert(trades).values({
         id: crypto.randomUUID(),
@@ -307,7 +315,7 @@ async function runCycle() {
         strategyId: "streak-5m",
         signal,
         stake,
-        targetProfitSnapshot: targetProfit,
+        targetProfitSnapshot: agentTarget,
         result: "pending",
         tradeMode: "paper",
         entryPrice: btcPrice,

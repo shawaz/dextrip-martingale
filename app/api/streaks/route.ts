@@ -48,7 +48,6 @@ export async function GET() {
   const streakHistory = [...roundRows]
     .filter((round) => round.status === "closed")
     .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())
-    .slice(0, 20)
     .map((round, index) => {
       const entry = Number(round.officialEntryPrice ?? round.entryPrice ?? 0)
       const exit = Number(round.officialExitPrice ?? round.exitPrice ?? 0)

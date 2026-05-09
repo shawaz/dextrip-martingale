@@ -14,14 +14,21 @@ export type MarketState = {
   breakout: boolean;
   liquiditySweep: boolean;
   emaSlope: 1 | 0 | -1;
-  lowVolume: boolean;
+  highVolume: boolean;
 };
 
 export async function buildMarketState(price: number): Promise<MarketState> {
-  const response = await fetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=30");
-  const candles = (await response.json()) as Array<[number, string, string, string, string, string]>;
-  const closes = candles.map((row) => Number(row[4]));
-  const volumes = candles.map((row) => Number(row[5]));
+  let closes: number[] = [];
+  let volumes: number[] = [];
+  try {
+    const response = await fetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=30");
+    const candles = (await response.json()) as Array<[number, string, string, string, string, string]>;
+    closes = candles.map((row) => Number(row[4]));
+    volumes = candles.map((row) => Number(row[5]));
+  } catch {
+    closes = Array(30).fill(price);
+    volumes = Array(30).fill(1);
+  }
   const current = closes.at(-1) ?? price;
   const previous = closes.at(-5) ?? current;
   const trendMovePct = previous ? ((current - previous) / previous) * 100 : 0;
@@ -72,7 +79,7 @@ export async function buildMarketState(price: number): Promise<MarketState> {
       : emaRecent[2] < emaRecent[0] && ((emaRecent[0] - emaRecent[2]) / (emaRecent[0] || 1)) * 100 > 0.01 ? -1
       : 0)
     : 0;
-  const lowVolume = volumeExpansion < 0.5;
+  const highVolume = volumeExpansion > 1.5;
 
   return {
     price,
@@ -86,7 +93,7 @@ export async function buildMarketState(price: number): Promise<MarketState> {
     breakout,
     liquiditySweep,
     emaSlope,
-    lowVolume,
+    highVolume,
   };
 }
 
