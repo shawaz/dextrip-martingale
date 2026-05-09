@@ -207,7 +207,7 @@ export default function DextripMartingale() {
           </div>
         </div>
         {data?.recentResultsIcons && data.recentResultsIcons.length > 0 && (
-          <div className="flex items-center gap-2 p-4 rounded-xl border border-[#222222] bg-[#121212] overflow-x-auto">
+          <div className="flex items-center gap-2 p-4 rounded-xl border border-[#222222] bg-[#121212] overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             <span className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest shrink-0 mr-1">RESULTS:</span>
             <span className="text-[10px] text-zinc-500 font-mono mr-2">{data.recentResultsIcons.length}</span>
             {data.recentResultsIcons.map((icon: string, i: number) => (
@@ -221,22 +221,19 @@ export default function DextripMartingale() {
         )}
         <div className="space-y-4">
           {activeTab === "live" ? (
-            <>
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                {[
-                  { label: "Balance", value: data?.liveSummary?.balance != null ? `$${Number(data.liveSummary.balance).toFixed(2)}` : `Check Wallet`, cayan: true },
-                  { label: "Wallet", value: data?.wallet?.wallet ? `${data.wallet.wallet.slice(0, 6)}...${data.wallet.wallet.slice(-4)}` : "Not Set", danger: !data?.wallet?.wallet },
-                  { label: "Status", value: data?.wallet?.connected ? "Connected" : "Disconnected", cayan: !!data?.wallet?.connected, danger: !data?.wallet?.connected },
-                  { label: "Last Check", value: data?.wallet?.lastUpdated ? new Date(data.wallet.lastUpdated).toLocaleTimeString() : "Never", danger: true },
-                ].map((stat: any) => (
-                  <div key={stat.label} className="rounded-xl border border-[#222222] bg-[#121212] p-4">
-                    <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">{stat.label}</div>
-                    <div className={cn("mt-2 text-xl font-semibold", stat.danger ? "text-red-400" : stat.cayan ? "text-cyan-400" : stat.emerald ? "text-emerald-400" : "text-white")}>{stat.value}</div>
-                  </div>
-                ))}
-              </div>
-
-            </>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {[
+                { label: "Invested", value: `$${Number(data?.liveStats?.invested ?? 0).toFixed(2)}`, warning: true },
+                { label: "Earnings", value: `$${Number(data?.liveStats?.profits ?? 0).toFixed(2)}`, emerald: true },
+                { label: "Balance", value: `$${Number(data?.liveStats?.balance ?? 0).toFixed(2)}`, cayan: true },
+                { label: "Capital", value: `$${Number(data?.liveStats?.capital ?? 0).toFixed(2)}` },
+              ].map((stat) => (
+                <div key={stat.label} className="rounded-xl border border-[#222222] bg-[#121212] p-4">
+                  <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">{stat.label}</div>
+                  <div className={cn("mt-2 text-xl font-semibold", stat.warning ? "text-amber-400" : stat.emerald ? "text-emerald-400" : stat.cayan ? "text-cayan-400" : "text-white")}>{stat.value}</div>
+                </div>
+              ))}
+            </div>
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               {[

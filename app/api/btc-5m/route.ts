@@ -325,6 +325,8 @@ export async function GET(req: Request) {
       .where(and(eq(trades.strategyId, "streak-5m"), eq(trades.tradeMode, "paper")))
       .groupBy(trades.agentId)
 
+    const agentLadders: Record<string, number[]> = {}
+
     const rows = streakAgents.map((streak) => {
       const agent = agentResults.find((row) => row.id === streak.id)
       const baseTrades = paperTrades.filter((trade) => trade.agentId === streak.id && trade.roundId.startsWith("BTC5M-")).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
@@ -333,6 +335,12 @@ export async function GET(req: Request) {
         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
       const agentTrades = baseTrades
 
+      const agentTarget = agentSettings[`target_${streak.id}`] ?? targetProfit
+      const agentMultiplierVal = agentSettings[`multiplier_${streak.id}`] ?? multiplier
+      const agentStepsVal = agentSettings[`steps_${streak.id}`] ?? ladderSteps
+      const agentLadder = buildLadder(agentTarget, agentMultiplierVal, agentStepsVal)
+      agentLadders[streak.id] = agentLadder
+
       const settledTrades = agentTrades.filter((trade) => trade.result !== "pending")
       const pendingTrade = agentTrades.find((trade) => trade.result === "pending")
 
@@ -340,10 +348,10 @@ export async function GET(req: Request) {
         settledTrades.map((trade) => ({
           stake: Number(trade.stake),
           result: trade.result as "won" | "loss" | "pending" | "skipped",
-          targetProfit: Number(trade.targetProfitSnapshot ?? targetProfit),
+          targetProfit: Number(trade.targetProfitSnapshot ?? agentTarget),
         })),
-        ladder,
-        targetProfit,
+        agentLadder,
+        agentTarget,
         agent?.startingBankroll ?? 1000,
       )
 
@@ -354,11 +362,11 @@ export async function GET(req: Request) {
 
       if (pendingTrade) {
         const pendingStake = Number(pendingTrade.stake)
-        const pendingStepIndex = ladder.indexOf(pendingStake)
+        const pendingStepIndex = agentLadder.indexOf(pendingStake)
         const pendingStep = pendingStepIndex >= 0 ? pendingStepIndex + 1 : 1
         currentStep = pendingStep
         previousStep = pendingStep > 1 ? pendingStep - 1 : 0
-        invested = ladder.slice(0, pendingStep).reduce((sum, value) => sum + value, 0)
+        invested = agentLadder.slice(0, pendingStep).reduce((sum, value) => sum + value, 0)
         status = "active"
       }
 
@@ -366,7 +374,6 @@ export async function GET(req: Request) {
       const liveRealizedProfit = liveAgentTrades.reduce((sum, trade) => sum + Math.max(0, Number(trade.pnl ?? 0)), 0)
       const liveRealizedLoss = liveAgentTrades.reduce((sum, trade) => sum + Math.abs(Math.min(0, Number(trade.pnl ?? 0))), 0)
       const balance = state.realizedProfit - state.realizedLoss
-      // Real PnL from ALL paper trades (stake-based accounting)
       const realBalance = agentRealPnLs.find(r => r.agentId === streak.id)?.total ?? 0
       const streakSignal = (streak as any).streak ? getStreakSignal((streak as any).streak) : null
 
@@ -377,9 +384,6 @@ export async function GET(req: Request) {
 
       const isLive = agent?.isLive ?? false
       const direction = streakSignal ?? streak.direction
-      const agentTarget = agentSettings[`target_${streak.id}`] ?? targetProfit
-      const agentMultiplierVal = agentSettings[`multiplier_${streak.id}`] ?? multiplier
-      const agentStepsVal = agentSettings[`steps_${streak.id}`] ?? ladderSteps
 
       return {
         id: streak.id,
@@ -400,7 +404,7 @@ export async function GET(req: Request) {
         balance,
         realBalance,
         capital: state.totalCapital + balance,
-        ladder,
+        ladder: agentLadder,
         status: pendingTrade ? "active" : triggerActive ? "ready" : status,
         triggerActive,
         isLive,
@@ -447,6 +451,16 @@ export async function GET(req: Request) {
     const totalBalance = totalEarnings - totalInvested
     // Capital = Starting Capital + Balance
     const totalCapital = totalStartingCapital + totalBalance
+
+    // Live stats from DB (all live trades)
+    const [liveAggRow] = await db().select({
+      totalInvested: sql<number>`COALESCE(SUM(stake), 0)`,
+      totalPnl: sql<number>`COALESCE(SUM(pnl), 0)`,
+    }).from(trades).where(and(eq(trades.strategyId, "streak-5m"), eq(trades.tradeMode, "live")))
+    const totalLiveInvested = liveAggRow?.totalInvested ?? 0
+    const totalLivePnl = liveAggRow?.totalPnl ?? 0
+    const liveWalletBalance = dbBalance || wallet?.balance || 0
+    const livePending = liveTrades.filter((t) => t.result === "pending").reduce((s, t) => s + Number(t.stake ?? 0), 0)
     
     return NextResponse.json({
         live: null,
@@ -497,7 +511,8 @@ export async function GET(req: Request) {
             const windowLabel = start && end
               ? `${start.toLocaleDateString("en-US", { month: "long", day: "numeric" })}, ${start.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true })} - ${end.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true })}`
               : trade.roundId
-            const ladderIndex = ladder.indexOf(Number(trade.stake))
+            const tradeAgentLadder = agentLadders[trade.agentId] ?? ladder
+            const ladderIndex = tradeAgentLadder.indexOf(Number(trade.stake))
             const ladderStage = ladderIndex >= 0 ? ladderIndex + 1 : null
             const tradeProfit = trade.tradeMode !== "live" ? (pnlMap.get(trade.id) ?? 0) : 0
             const closedStage = trade.result === "won" ? ladderStage : null
@@ -538,6 +553,12 @@ export async function GET(req: Request) {
           winRate: totalTrades > 0 ? (totalWins / totalTrades) * 100 : 0,
           totalWins: totalWins,
           totalTrades: totalTrades,
+        },
+        liveStats: {
+          invested: totalLiveInvested,
+          profits: totalLivePnl,
+          balance: liveWalletBalance,
+          capital: liveWalletBalance + livePending,
         },
       })
   } catch (error) {
