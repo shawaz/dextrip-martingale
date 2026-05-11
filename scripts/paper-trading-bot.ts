@@ -412,7 +412,11 @@ async function runCycle() {
       if (!signal) continue;
 
       const pmPrice = await fetchPolymarketSharePrice(pmSlug, signal as "UP" | "DOWN");
-      if (pmPrice == null || pmPrice >= 0.50) continue;
+      if (pmPrice == null) continue;
+      if (pmPrice >= 0.50) {
+        console.log(`[RETRY CHECK] ${streak.id} PM still $${pmPrice.toFixed(2)} >= $0.50 for ${signal} — waiting`);
+        continue;
+      }
 
       // PM price dropped below $0.50 - create the trade now!
       const targetProfit = await getTargetProfit();
