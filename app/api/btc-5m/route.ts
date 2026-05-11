@@ -368,22 +368,30 @@ export async function GET(req: Request) {
       let invested = state.investedOpen
       let status = state.status
 
+      const streakSignal = (streak as any).streak ? getStreakSignal((streak as any).streak) : null
+      const direction = streakSignal ?? streak.direction
+
       if (pendingTrade) {
         const pendingStake = Number(pendingTrade.stake)
         const pendingStepIndex = agentLadder.indexOf(pendingStake)
         const pendingStep = pendingStepIndex >= 0 ? pendingStepIndex + 1 : 1
         currentStep = pendingStep
         previousStep = pendingStep > 1 ? pendingStep - 1 : 0
-        invested = agentLadder.slice(0, pendingStep).reduce((sum, value) => sum + value, 0)
+        const pmPrice = polymarketPrices
+          ? (direction === "UP" ? polymarketPrices.up : polymarketPrices.down)
+          : null
+        invested = (pmPrice != null && pmPrice < 0.50)
+          ? agentLadder.slice(0, pendingStep).reduce((sum, value) => sum + value, 0)
+          : state.investedOpen
         status = "active"
       }
+      if (invested === 0) invested = agentTarget
 
       const livePendingStake = liveAgentTrades.filter((trade) => trade.result === "pending").reduce((sum, trade) => sum + Number(trade.stake ?? 0), 0)
       const liveRealizedProfit = liveAgentTrades.reduce((sum, trade) => sum + Math.max(0, Number(trade.pnl ?? 0)), 0)
       const liveRealizedLoss = liveAgentTrades.reduce((sum, trade) => sum + Math.abs(Math.min(0, Number(trade.pnl ?? 0))), 0)
       const balance = state.realizedProfit - state.realizedLoss
       const realBalance = agentRealPnLs.find(r => r.agentId === streak.id)?.total ?? 0
-      const streakSignal = (streak as any).streak ? getStreakSignal((streak as any).streak) : null
 
       const triggerActive =
         streak.trigger === "always" ? true :
@@ -391,7 +399,6 @@ export async function GET(req: Request) {
         streak.trigger === "rsi" ? (rsi != null && (rsi <= 30 || rsi >= 80)) : false
 
       const isLive = agent?.isLive ?? false
-      const direction = streakSignal ?? streak.direction
 
       return {
         id: streak.id,

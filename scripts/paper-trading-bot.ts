@@ -43,15 +43,25 @@ async function getTrendStrengthThreshold() {
   return getSetting("trend_strength_threshold", 8);
 }
 
-async function fetchBtcPrice(): Promise<number> {
+async function fetchKlineClosePrices(): Promise<{ spot: number; closes: Map<number, number> }> {
   try {
-    const res = await fetch("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT");
-    const data = await res.json();
-    return Number(data.price);
+    const res = await fetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=10")
+    const data = await res.json()
+    const closes = new Map<number, number>()
+    for (const kline of data) {
+      closes.set(kline[0] / 1000, Number(kline[4]))
+    }
+    const spot = Number(data[data.length - 1]?.[4] ?? 0)
+    return { spot, closes }
   } catch (e) {
-    console.error("[ERROR] Failed to fetch BTC price:", e);
-    return 0;
+    console.error("[ERROR] Failed to fetch klines:", e)
+    return { spot: 0, closes: new Map() }
   }
+}
+
+async function fetchBtcPrice(): Promise<number> {
+  const { spot } = await fetchKlineClosePrices()
+  return spot
 }
 
 function calculateRsi(closes: number[], period = 14): number | null {
@@ -126,7 +136,7 @@ async function runCycle() {
   
   const isNewWindow = windowTs !== lastProcessedWindow;
   
-    const btcPrice = await fetchBtcPrice();
+    const { spot: btcPrice, closes: windowCloses } = await fetchKlineClosePrices();
     if (!btcPrice || isNaN(btcPrice)) {
       return;
     }
@@ -160,22 +170,27 @@ async function runCycle() {
       }
     } catch {}
     if (!direction) {
+      const roundStartTs = Math.floor(new Date(openRound.startTime).getTime() / 1000)
+      const exitPrice = windowCloses.get(roundStartTs) ?? btcPrice
       await db().update(rounds).set({
-        exitPrice: btcPrice,
+        exitPrice,
         updatedAt: new Date().toISOString(),
       }).where(eq(rounds.id, openRound.id));
       const roundEndTime = new Date(openRound.endTime).getTime();
       const minutesSinceEnd = (Date.now() - roundEndTime) / 60000;
-      if (minutesSinceEnd < 5) {
+      if (minutesSinceEnd < 1) {
         console.log(`[WAIT] Round ${openRound.roundId} waiting for Polymarket resolution (${minutesSinceEnd.toFixed(1)}m since end)`);
         continue;
       }
-      console.log(`[FALLBACK] Round ${openRound.roundId} no Polymarket resolution after ${minutesSinceEnd.toFixed(1)}m, using BTC price`);
-      direction = btcPrice > prevPrice ? "UP" : btcPrice < prevPrice ? "DOWN" : null;
+      console.log(`[FALLBACK] Round ${openRound.roundId} no Polymarket resolution after ${minutesSinceEnd.toFixed(1)}m, using kline close`);
+      direction = exitPrice > prevPrice ? "UP" : exitPrice < prevPrice ? "DOWN" : null;
     }
     
+    const roundStartTs = Math.floor(new Date(openRound.startTime).getTime() / 1000)
+    const closePrice = windowCloses.get(roundStartTs) ?? btcPrice
+
     await db().update(rounds).set({
-      exitPrice: btcPrice,
+      exitPrice: closePrice,
       resolvedDirection: direction,
       status: "closed",
       updatedAt: new Date().toISOString(),
@@ -207,7 +222,7 @@ async function runCycle() {
       await db().update(trades).set({
         result: won ? "won" : "loss",
         pnl,
-        exitPrice: btcPrice,
+        exitPrice: closePrice,
         updatedAt: new Date().toISOString(),
       }).where(eq(trades.id, trade.id));
       
@@ -309,7 +324,11 @@ async function runCycle() {
       let pmPrice: number | null = null;
       if (pmSlug) {
         pmPrice = await fetchPolymarketSharePrice(pmSlug, signal as "UP" | "DOWN");
-        if (pmPrice != null && pmPrice >= 0.50) {
+        if (pmPrice == null) {
+          console.log(`[SKIP] ${streak.id} PM price unavailable for ${signal}`);
+          continue;
+        }
+        if (pmPrice >= 0.50) {
           console.log(`[SKIP] ${streak.id} PM price $${pmPrice.toFixed(2)} >= $0.50 for ${signal}`);
           continue;
         }
