@@ -334,6 +334,13 @@ async function runCycle() {
         console.log(`[SKIP] ${streak.id} already has pending trade`);
         continue;
       }
+
+      // Deduplication guard: skip if a trade already exists for this agent+round
+      const existingTrade = await db().select({ id: trades.id }).from(trades).where(and(eq(trades.agentId, streak.id), eq(trades.roundId, roundId))).limit(1);
+      if (existingTrade.length > 0) {
+        console.log(`[DEDUP] ${streak.id} trade already exists for ${roundId}, skipping duplicate`);
+        continue;
+      }
       
       const nextStep = Math.max(0, state.currentStep);
       const stake = agentLadder[nextStep] || agentLadder[0];
