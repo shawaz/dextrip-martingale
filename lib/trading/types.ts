@@ -84,4 +84,5 @@ export interface AgentTradeRecord {
   signal: Exclude<TradeSignal, "HOLD">;
   entry: number;
   result: "pending" | "won" | "loss";
+  polymarketPrice?: number | null;
 }

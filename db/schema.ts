@@ -78,6 +78,7 @@ export const trades = pgTable("trades", {
   tradeMode: text("trade_mode").notNull().default("paper"),
   externalOrderId: text("external_order_id"),
   orderStatus: text("order_status").notNull().default("idle"),
+  polymarketPrice: real("polymarket_price"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });

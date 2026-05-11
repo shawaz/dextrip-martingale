@@ -4,7 +4,7 @@ import { eq, and, desc, lt } from "drizzle-orm";
 import { buildLadder, replayStreakMachine } from "@/lib/trading/streak-machine";
 import { sendTradeAlert, sendSummary, sendTelegramMessage, isTelegramEnabled } from "@/lib/telegram/bot";
 import { buildMarketState, type MarketState } from "@/lib/trading/local-selection";
-import { fetchPolymarketOutcome } from "@/lib/trading/polymarket";
+import { fetchPolymarketOutcome, fetchPolymarketSharePrice } from "@/lib/trading/polymarket";
 
 const STREAK_AGENTS = [
   // Always-trade agents
@@ -200,10 +200,10 @@ async function runCycle() {
         updatedAt: new Date().toISOString(),
       }).where(eq(trades.id, trade.id));
       
-      console.log(`[RESOLVE] ${trade.agentId} | ${openRound.roundId} | signal:${trade.signal} | actual:${direction} (${resolutionSource}) | result:${won ? "WON" : "LOSS"} | pnl:$${pnl.toFixed(2)}`);
+      console.log(`[RESOLVE] ${trade.agentId} | ${openRound.roundId} | signal:${trade.signal} | actual:${direction} (${resolutionSource}) | result:${won ? "WON" : "LOSS"} | pnl:$${pnl.toFixed(2)} | PM:$${Number(trade.polymarketPrice ?? 0).toFixed(2)}`);
 
       // Telegram alert for resolved trade
-      await sendTradeAlert("resolved", trade.agentId, openRound.roundId, trade.signal, Number(trade.stake), 0, 0, won ? "won" : "loss", pnl);
+      await sendTradeAlert("resolved", trade.agentId, openRound.roundId, trade.signal, Number(trade.stake), 0, 0, won ? "won" : "loss", pnl, Number(trade.polymarketPrice ?? null));
     }
     
     console.log(`[RESOLVE] Round ${openRound.roundId} closed | direction:${direction} | src:${resolutionSource} | entry:$${prevPrice.toFixed(2)} | exit:$${btcPrice.toFixed(2)}`);
@@ -291,6 +291,19 @@ async function runCycle() {
       
       if (!signal) continue;
 
+      // Polymarket share price gate: only trade if price < $0.50
+      const parts = roundId.split("-");
+      const ts = parts[parts.length - 1];
+      const pmSlug = ts ? `btc-updown-5m-${ts}` : null;
+      let pmPrice: number | null = null;
+      if (pmSlug) {
+        pmPrice = await fetchPolymarketSharePrice(pmSlug, signal as "UP" | "DOWN");
+        if (pmPrice != null && pmPrice >= 0.50) {
+          console.log(`[SKIP] ${streak.id} PM price $${pmPrice.toFixed(2)} >= $0.50 for ${signal}`);
+          continue;
+        }
+      }
+
       // Per-agent settings override globals
       const agentTarget = perAgentVal(streak.id, "target", targetProfit);
       const agentMultiplier = perAgentVal(streak.id, "multiplier", multiplier);
@@ -319,14 +332,15 @@ async function runCycle() {
         result: "pending",
         tradeMode: "paper",
         entryPrice: btcPrice,
+        polymarketPrice: pmPrice,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
       
-      console.log(`[TRADE] ${streak.id} | signal:${signal} | stake:$${stake} | step:${nextStep + 1}/${ladder.length} | RSI:${rsi?.toFixed(1) || "N/A"}`);
+      console.log(`[TRADE] ${streak.id} | signal:${signal} | stake:$${stake} | step:${nextStep + 1}/${agentLadder.length} | RSI:${rsi?.toFixed(1) || "N/A"} | PM:$${pmPrice != null ? pmPrice.toFixed(2) : "N/A"}`);
 
       // Telegram alert for created trade
-      await sendTradeAlert("created", streak.id, roundId, signal, stake, nextStep + 1, ladder.length);
+      await sendTradeAlert("created", streak.id, roundId, signal, stake, nextStep + 1, agentLadder.length, undefined, undefined, pmPrice);
     }
 
     const trendLabel = marketState ? `${marketState.trendDirection}(${marketState.trendStrength.toFixed(1)})` : "N/A";

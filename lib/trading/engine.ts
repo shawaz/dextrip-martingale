@@ -4,6 +4,7 @@ import { fetchMarketSnapshot } from "./market-data";
 import { evaluateStrategySet } from "./strategies";
 import { selectAgentDecision } from "./llm";
 import { executeBullpenTrade } from "./bullpen";
+import { fetchPolymarketSharePrice } from "./polymarket";
 import { AgentProfile, ExecutionPlan, RoundWindow, StrategyDecision, Timeframe } from "./types";
 
 function sleep(ms: number): Promise<void> {
@@ -87,6 +88,7 @@ async function processAgent(params: {
     signal: "UP" | "DOWN";
     entry: number;
     result: "pending";
+    polymarketPrice?: number | null;
   }) => Promise<void>;
 }): Promise<void> {
   if (params.hasExistingTrade) {
@@ -117,6 +119,15 @@ async function processAgent(params: {
     return;
   }
 
+  let polymarketPrice: number | null = null;
+  if (params.marketSlug) {
+    polymarketPrice = await fetchPolymarketSharePrice(params.marketSlug, decision.signal);
+    if (polymarketPrice != null && polymarketPrice >= 0.50) {
+      console.log(`${prefix} skipped — PM price $${polymarketPrice.toFixed(2)} >= $0.50 for ${decision.signal}`);
+      return;
+    }
+  }
+
   const executionPlan = buildExecutionPlan({
     bankroll: params.agent.bankroll,
     confidence: decision.confidence,
@@ -140,6 +151,7 @@ async function processAgent(params: {
     signal: decision.signal,
     entry: params.currentPrice,
     result: "pending",
+    polymarketPrice,
   });
 }
 

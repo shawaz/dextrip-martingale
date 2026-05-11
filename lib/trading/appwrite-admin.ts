@@ -32,6 +32,7 @@ interface AppwriteTradeDocument extends Models.Document {
   signal: "UP" | "DOWN";
   entry: number;
   result: "pending" | "won" | "loss";
+  polymarketPrice?: number | null;
 }
 
 const seededAgents: Array<{

@@ -3,6 +3,7 @@ import { db, agents, rounds, trades, settings, walletBalances } from "@/db/index
 import { eq, and, desc, lt, sql } from "drizzle-orm"
 import { buildLadder, replayStreakMachine } from "@/lib/trading/streak-machine"
 import { buildMarketState, type MarketState } from "@/lib/trading/local-selection"
+import { fetchPolymarketSharePrice } from "@/lib/trading/polymarket"
 
 async function getSetting(key: string, fallback: number): Promise<number> {
   try {
@@ -209,6 +210,13 @@ export async function GET(req: Request) {
     const windowTs = currentTs - (currentTs % intervalS)
     const startTimeIso = new Date(windowTs * 1000).toISOString()
     const endTimeIso = new Date((windowTs + intervalS) * 1000).toISOString()
+
+    const pmSlug = `btc-updown-5m-${windowTs}`
+    const [pmPriceUp, pmPriceDown] = await Promise.all([
+      fetchPolymarketSharePrice(pmSlug, "UP").catch(() => null),
+      fetchPolymarketSharePrice(pmSlug, "DOWN").catch(() => null),
+    ])
+    const polymarketPrices = { up: pmPriceUp, down: pmPriceDown }
 
     // Note: Round creation is handled exclusively by the paper trading bot
     // to ensure accurate entry prices from live market data
@@ -533,6 +541,7 @@ export async function GET(req: Request) {
           highVolume: marketState.highVolume,
         } : null,
         trendStrengthThreshold: trendThreshold,
+        polymarketPrices,
         targetProfit,
         multiplier,
         ladderSteps,

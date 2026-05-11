@@ -32,7 +32,8 @@ export async function sendTradeAlert(
   step: number,
   totalSteps: number,
   result?: string,
-  pnl?: number
+  pnl?: number,
+  pmPrice?: number | null
 ): Promise<void> {
   if (!isTelegramEnabled()) return;
 
@@ -46,7 +47,8 @@ export async function sendTradeAlert(
     text += `<b>Round:</b> ${roundId}\n`;
     text += `<b>Signal:</b> ${icon} ${signal}\n`;
     text += `<b>Stake:</b> $${stake}\n`;
-    text += `<b>Step:</b> ${step}/${totalSteps}`;
+    text += `<b>Step:</b> ${step}/${totalSteps}\n`;
+    if (pmPrice != null) text += `<b>PM Price:</b> $${pmPrice.toFixed(2)}`;
   } else {
     text = `${statusIcon} <b>Trade Resolved</b>\n\n`;
     text += `<b>Agent:</b> ${agentId}\n`;
@@ -54,6 +56,7 @@ export async function sendTradeAlert(
     text += `<b>Signal:</b> ${icon} ${signal}\n`;
     text += `<b>Result:</b> ${result?.toUpperCase()}\n`;
     text += `<b>P&L:</b> $${pnl?.toFixed(2)}`;
+    if (pmPrice != null) text += `\n<b>PM Price:</b> $${pmPrice.toFixed(2)}`;
   }
 
   await sendTelegramMessage(text);

@@ -275,21 +275,32 @@ export default function DextripMartingale() {
                     <td className="px-2 md:px-4 py-2 md:py-4 text-zinc-300 text-nowrap">{row.direction}</td>
                     <td className="px-2 md:px-4 py-2 md:py-4 text-zinc-400">
                       <div className="flex flex-wrap gap-1 md:gap-2">
-                        {row.ladder.map((value, index) => (
-                          <span
-                            key={value}
-                            className={cn(
-                              "rounded-full border px-1.5 md:px-2.5 py-0.5 md:py-1 text-[8px] md:text-[10px] font-bold whitespace-nowrap",
-                              row.currentStep === index + 1
-                                ? "border-amber-500/20 bg-amber-500/10 text-amber-300"
-                                : row.previousStep === index + 1
-                                  ? "border-red-500/20 bg-red-500/10 text-red-400"
-                                  : "border-zinc-700 bg-zinc-900 text-zinc-500"
-                            )}
-                          >
-                            ${value}
-                          </span>
-                        ))}
+                        {row.ladder.map((value, index) => {
+                          const isCurrent = row.currentStep === index + 1
+                          const pmPrice = data?.polymarketPrices
+                            ? (row.direction === "UP" ? data.polymarketPrices.up : data.polymarketPrices.down)
+                            : null
+                          const pmColor = pmPrice != null
+                            ? (pmPrice < 0.50
+                                ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-400"
+                                : "border-amber-500/20 bg-amber-500/10 text-amber-300")
+                            : null
+                          return (
+                            <span
+                              key={value}
+                              className={cn(
+                                "rounded-full border px-1.5 md:px-2.5 py-0.5 md:py-1 text-[8px] md:text-[10px] font-bold whitespace-nowrap",
+                                isCurrent
+                                  ? (pmColor ?? "border-amber-500/20 bg-amber-500/10 text-amber-300")
+                                  : row.previousStep === index + 1
+                                    ? "border-red-500/20 bg-red-500/10 text-red-400"
+                                    : "border-zinc-700 bg-zinc-900 text-zinc-500"
+                              )}
+                            >
+                              ${value}
+                            </span>
+                          )
+                        })}
                       </div>
                     </td>
                     <td className="px-2 md:px-4 py-2 md:py-4 font-mono text-cyan-400 text-nowrap">${(() => {
@@ -386,6 +397,7 @@ export default function DextripMartingale() {
                     <th className="px-2 md:px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Streak</th>
                     <th className="px-2 md:px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Window</th>
                     <th className="px-2 md:px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Signal</th>
+                    <th className="px-2 md:px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">PM $</th>
                     <th className="px-2 md:px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Stake</th>
                     <th className="px-2 md:px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Stage</th>
                     <th className="px-2 md:px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Profit</th>
@@ -398,6 +410,9 @@ export default function DextripMartingale() {
                       <td className="px-2 md:px-4 py-2 md:py-4 text-zinc-100 font-semibold text-nowrap">{rows.find((row) => row.id === trade.agentId)?.name ?? trade.agentId}</td>
                       <td className="px-2 md:px-4 py-2 md:py-4 text-zinc-300 text-nowrap">{trade.windowLabel ?? trade.roundId}</td>
                       <td className="px-2 md:px-4 py-2 md:py-4 text-zinc-300 text-nowrap">{trade.signal}</td>
+                      <td className={cn("px-2 md:px-4 py-2 md:py-4 font-mono text-nowrap", trade.polymarketPrice == null ? "text-zinc-600" : Number(trade.polymarketPrice) < 0.50 ? "text-emerald-400" : "text-amber-400")}>
+                        {trade.polymarketPrice == null ? "—" : `$${Number(trade.polymarketPrice).toFixed(2)}`}
+                      </td>
                       <td className="px-2 md:px-4 py-2 md:py-4 font-mono text-zinc-300 text-nowrap">${Number(trade.stake ?? 0).toFixed(2)}</td>
                       <td className="px-2 md:px-4 py-2 md:py-4 text-zinc-300 text-nowrap">{trade.closedStage ? `Closed ${trade.closedStage}` : trade.ladderStage ? `Stage ${trade.ladderStage}` : "--"}</td>
                       <td className={cn("px-2 md:px-4 py-2 md:py-4 font-mono text-nowrap", trade.result === "pending" ? "text-zinc-600" : (trade.tradeProfit ?? 0) >= 0 ? "text-emerald-400" : "text-red-400")}>
@@ -432,6 +447,7 @@ export default function DextripMartingale() {
                     <th className="px-2 md:px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Streak</th>
                     <th className="px-2 md:px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Window</th>
                     <th className="px-2 md:px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Direction</th>
+                    <th className="px-2 md:px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">PM $</th>
                     <th className="px-2 md:px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Stake</th>
                     <th className="px-2 md:px-4 py-3 font-bold uppercase tracking-widest text-zinc-500 text-[9px]">Status</th>
                   </tr>
@@ -439,13 +455,16 @@ export default function DextripMartingale() {
                 <tbody className="divide-y divide-[#222222]">
                   {(data?.liveHistory ?? []).length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-2 md:px-4 py-6 text-center text-zinc-500">No live trades yet</td>
+                      <td colSpan={6} className="px-2 md:px-4 py-6 text-center text-zinc-500">No live trades yet</td>
                     </tr>
                   ) : (data.liveHistory ?? []).slice(0, displayLimit).map((trade: any) => (
                     <tr key={trade.id} className="hover:bg-white/[0.01]">
                       <td className="px-2 md:px-4 py-2 md:py-4 text-zinc-100 font-semibold text-nowrap">{rows.find((row) => row.id === trade.agentId)?.name ?? trade.agentId}</td>
                       <td className="px-2 md:px-4 py-2 md:py-4 text-zinc-300 text-nowrap">{trade.windowLabel ?? trade.roundId}</td>
                       <td className="px-2 md:px-4 py-2 md:py-4 text-zinc-300 text-nowrap">{trade.signal}</td>
+                      <td className={cn("px-2 md:px-4 py-2 md:py-4 font-mono text-nowrap", trade.polymarketPrice == null ? "text-zinc-600" : Number(trade.polymarketPrice) < 0.50 ? "text-emerald-400" : "text-amber-400")}>
+                        {trade.polymarketPrice == null ? "—" : `$${Number(trade.polymarketPrice).toFixed(2)}`}
+                      </td>
                       <td className="px-2 md:px-4 py-2 md:py-4 font-mono text-zinc-300 text-nowrap">${Number(trade.stake ?? 0).toFixed(2)}</td>
                       <td className={cn("px-2 md:px-4 py-2 md:py-4 font-semibold text-nowrap", trade.result === "won" ? "text-emerald-400" : trade.result === "loss" ? "text-red-400" : "text-amber-400")}>
                         {trade.result === "won" ? "WIN" : trade.result === "loss" ? "LOSS" : "PENDING"}

@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const BULLPEN_PATH = process.env.BULLPEN_PATH || "/opt/homebrew/bin/bullpen";
 
 function outcomeFromPrices(openPrice?: number | null, closePrice?: number | null): "UP" | "DOWN" | null {
   if (openPrice == null || closePrice == null) return null;
@@ -41,10 +42,32 @@ export function polymarketSlugForRound(startTimeIso: string, intervalMinutes: nu
   return `btc-updown-${intervalMinutes}m-${Math.floor(new Date(startTimeIso).getTime() / 1000)}`;
 }
 
+export async function fetchPolymarketSharePrice(slug: string, outcome: "UP" | "DOWN"): Promise<number | null> {
+  try {
+    const res = await fetch(`https://gamma-api.polymarket.com/markets/slug/${slug}`, {
+      signal: AbortSignal.timeout(10000),
+    })
+    if (!res.ok) return null
+    const raw = await res.text()
+    const cleaned = raw.replace(/[\x00-\x1f\x7f-\x9f]/g, "")
+    const data = JSON.parse(cleaned)
+    const market = Array.isArray(data) ? data[0] : data
+
+    const outcomes: string[] = JSON.parse(market.outcomes ?? "[]")
+    const prices: string[] = JSON.parse(market.outcomePrices ?? "[]")
+
+    const index = outcomes.findIndex((name) => name.toUpperCase() === outcome)
+    if (index === -1 || !prices[index]) return null
+
+    return Number(prices[index])
+  } catch {
+    return null
+  }
+}
+
 export async function fetchPolymarketRoundTruth(startTimeIso: string, intervalMinutes: number = 15): Promise<PolymarketRoundTruth | null> {
   const slug = polymarketSlugForRound(startTimeIso, intervalMinutes);
   const timestamp = Math.floor(new Date(startTimeIso).getTime() / 1000);
-  const bullpenPath = "/opt/homebrew/bin/bullpen";
 
   let recentResults: any[] = [];
   let priceToBeat: number | null = null;
@@ -52,7 +75,7 @@ export async function fetchPolymarketRoundTruth(startTimeIso: string, intervalMi
   let resolvedDirection: "UP" | "DOWN" | null = null;
 
   try {
-    const { stdout: eventOut } = await execFileAsync(bullpenPath, ["polymarket", "event", slug, "--output", "json"], { timeout: 15000 });
+    const { stdout: eventOut } = await execFileAsync(BULLPEN_PATH, ["polymarket", "event", slug, "--output", "json"], { timeout: 15000 });
     const eventData = JSON.parse(eventOut);
     
     const outcomes = eventData?.markets?.[0]?.outcomes ?? [];
@@ -69,7 +92,7 @@ export async function fetchPolymarketRoundTruth(startTimeIso: string, intervalMi
   }
 
   try {
-    const { stdout: tradesOut } = await execFileAsync(bullpenPath, ["polymarket", "trades", slug, "--output", "json"], { timeout: 15000 });
+    const { stdout: tradesOut } = await execFileAsync(BULLPEN_PATH, ["polymarket", "trades", slug, "--output", "json"], { timeout: 15000 });
     const tradesData = JSON.parse(tradesOut);
     
     if (tradesData?.trades?.length > 0) {

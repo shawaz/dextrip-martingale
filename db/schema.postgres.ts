@@ -72,6 +72,7 @@ export const trades = pgTable("trades", {
   report: text("report").notNull().default(""),
   entryPrice: doublePrecision("entry_price").notNull(),
   exitPrice: doublePrecision("exit_price"),
+  polymarketPrice: doublePrecision("polymarket_price"),
   result: text("result").notNull(),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
