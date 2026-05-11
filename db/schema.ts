@@ -77,6 +77,7 @@ export const trades = pgTable("trades", {
   result: text("result").notNull(),
   tradeMode: text("trade_mode").notNull().default("paper"),
   externalOrderId: text("external_order_id"),
+  priceAtSignal: text("price_at_signal"),
   orderStatus: text("order_status").notNull().default("idle"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
