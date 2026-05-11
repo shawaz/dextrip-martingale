@@ -160,6 +160,9 @@ async function runCycle() {
       continue;
     }
     
+    const roundStartTs = Math.floor(new Date(openRound.startTime).getTime() / 1000)
+    const closePrice = windowCloses.get(roundStartTs) ?? btcPrice
+
     let direction: string | null = null;
     let resolutionSource = "binance";
     try {
@@ -170,24 +173,8 @@ async function runCycle() {
       }
     } catch {}
     if (!direction) {
-      const roundStartTs = Math.floor(new Date(openRound.startTime).getTime() / 1000)
-      const exitPrice = windowCloses.get(roundStartTs) ?? btcPrice
-      await db().update(rounds).set({
-        exitPrice,
-        updatedAt: new Date().toISOString(),
-      }).where(eq(rounds.id, openRound.id));
-      const roundEndTime = new Date(openRound.endTime).getTime();
-      const minutesSinceEnd = (Date.now() - roundEndTime) / 60000;
-      if (minutesSinceEnd < 1) {
-        console.log(`[WAIT] Round ${openRound.roundId} waiting for Polymarket resolution (${minutesSinceEnd.toFixed(1)}m since end)`);
-        continue;
-      }
-      console.log(`[FALLBACK] Round ${openRound.roundId} no Polymarket resolution after ${minutesSinceEnd.toFixed(1)}m, using kline close`);
-      direction = exitPrice > prevPrice ? "UP" : exitPrice < prevPrice ? "DOWN" : null;
+      direction = closePrice > prevPrice ? "UP" : closePrice < prevPrice ? "DOWN" : null;
     }
-    
-    const roundStartTs = Math.floor(new Date(openRound.startTime).getTime() / 1000)
-    const closePrice = windowCloses.get(roundStartTs) ?? btcPrice
 
     await db().update(rounds).set({
       exitPrice: closePrice,
