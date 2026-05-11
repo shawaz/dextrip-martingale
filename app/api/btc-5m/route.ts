@@ -380,12 +380,12 @@ export async function GET(req: Request) {
         const pmPrice = polymarketPrices
           ? (direction === "UP" ? polymarketPrices.up : polymarketPrices.down)
           : null
-        invested = (pmPrice != null && pmPrice < 0.50)
+        const isGreen = pmPrice != null && pmPrice < 0.50
+        invested = isGreen
           ? agentLadder.slice(0, pendingStep).reduce((sum, value) => sum + value, 0)
           : state.investedOpen
         status = "active"
       }
-      if (invested === 0) invested = agentTarget
 
       const livePendingStake = liveAgentTrades.filter((trade) => trade.result === "pending").reduce((sum, trade) => sum + Number(trade.stake ?? 0), 0)
       const liveRealizedProfit = liveAgentTrades.reduce((sum, trade) => sum + Math.max(0, Number(trade.pnl ?? 0)), 0)
