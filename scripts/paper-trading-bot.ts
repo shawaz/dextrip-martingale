@@ -370,6 +370,95 @@ async function runCycle() {
     const trendLabel = marketState ? `${marketState.trendDirection}(${marketState.trendStrength.toFixed(1)})` : "N/A";
     console.log(`[SUMMARY] RSI:${rsi?.toFixed(1) || "N/A"} | trend:${trendLabel} | threshold:${trendThreshold} | prev:${previousDirection}`);
   }
+
+  // Retry loop: re-check PM prices for agents skipped within this window
+  // Runs on every cycle, not just at window start
+  if (!isNewWindow) {
+    const parts = roundId.split("-");
+    const ts = parts[parts.length - 1];
+    const pmSlug = ts ? `btc-updown-5m-${ts}` : null;
+    if (!pmSlug) return;
+
+    const closedRounds = await getClosedRounds();
+    const recentDirections = closedRounds.map((r) => r.resolvedDirection).filter((d): d is string => Boolean(d));
+    function getStreakSignal(minLength: number): string | null {
+      if (recentDirections.length < minLength) return null;
+      const slice = recentDirections.slice(0, minLength);
+      if (slice.every((d) => d === "UP")) return "DOWN";
+      if (slice.every((d) => d === "DOWN")) return "UP";
+      return null;
+    }
+    const rsi = calculateRsi(
+      closedRounds.slice(0, 20).map((r) => Number(r.exitPrice || r.entryPrice)).filter((p) => p > 0).reverse().concat(btcPrice > 0 ? [btcPrice] : []),
+      14
+    );
+
+    for (const streak of STREAK_AGENTS) {
+      // Check if a trade already exists for this agent+round
+      const existingTrades = await db().select({ id: trades.id }).from(trades)
+        .where(and(eq(trades.agentId, streak.id), eq(trades.roundId, roundId)))
+        .limit(1);
+      if (existingTrades.length > 0) continue;
+
+      let signal: string | null = null;
+      if ("signal" in streak && streak.trigger === "always") {
+        signal = streak.signal;
+      } else if ("streak" in streak && streak.streak != null) {
+        signal = getStreakSignal(streak.streak);
+      } else if (streak.trigger === "rsi") {
+        if (rsi != null && rsi <= 30) signal = "UP";
+        else if (rsi != null && rsi >= 80) signal = "DOWN";
+      }
+      if (!signal) continue;
+
+      const pmPrice = await fetchPolymarketSharePrice(pmSlug, signal as "UP" | "DOWN");
+      if (pmPrice == null || pmPrice >= 0.50) continue;
+
+      // PM price dropped below $0.50 - create the trade now!
+      const targetProfit = await getTargetProfit();
+      const multiplier = await getMultiplier();
+      const ladderSteps = await getLadderSteps();
+      const ladder = buildLadder(targetProfit, multiplier, ladderSteps);
+      const allSettings = await db().select().from(settings);
+      const settingMap: Record<string, number> = {};
+      for (const s of allSettings) {
+        const val = Number(s.value);
+        if (!Number.isNaN(val)) settingMap[s.key] = val;
+      }
+      function perAgentVal(agentId: string, key: string, fallback: number): number {
+        return settingMap[`${key}_${agentId}`] ?? fallback;
+      }
+      const agentTarget = perAgentVal(streak.id, "target", targetProfit);
+      const agentMultiplier = perAgentVal(streak.id, "multiplier", multiplier);
+      const agentSteps = perAgentVal(streak.id, "steps", ladderSteps);
+      const agentLadder = (agentTarget !== targetProfit || agentMultiplier !== multiplier || agentSteps !== ladderSteps)
+        ? buildLadder(agentTarget, agentMultiplier, agentSteps)
+        : ladder;
+      
+      const { currentStep, pending } = await getAgentState(streak.id, agentLadder, agentTarget);
+      if (pending) continue;
+      const nextStep = Math.max(0, currentStep);
+      const stake = agentLadder[nextStep] || agentLadder[0];
+
+      await db().insert(trades).values({
+        id: crypto.randomUUID(),
+        agentId: streak.id,
+        roundId,
+        strategyId: "streak-5m",
+        signal,
+        stake,
+        targetProfitSnapshot: agentTarget,
+        result: "pending",
+        tradeMode: "paper",
+        entryPrice: btcPrice,
+        polymarketPrice: pmPrice,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      console.log(`[LATE TRADE] ${streak.id} | signal:${signal} | stake:$${stake} | step:${nextStep + 1}/${agentLadder.length} | PM:$${pmPrice.toFixed(2)} | price dropped mid-window`);
+      await sendTradeAlert("created", streak.id, roundId, signal, stake, nextStep + 1, agentLadder.length, undefined, undefined, pmPrice);
+    }
+  }
 }
 
 async function sendPeriodicSummary() {
