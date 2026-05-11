@@ -160,6 +160,17 @@ async function runCycle() {
       }
     } catch {}
     if (!direction) {
+      await db().update(rounds).set({
+        exitPrice: btcPrice,
+        updatedAt: new Date().toISOString(),
+      }).where(eq(rounds.id, openRound.id));
+      const roundEndTime = new Date(openRound.endTime).getTime();
+      const minutesSinceEnd = (Date.now() - roundEndTime) / 60000;
+      if (minutesSinceEnd < 5) {
+        console.log(`[WAIT] Round ${openRound.roundId} waiting for Polymarket resolution (${minutesSinceEnd.toFixed(1)}m since end)`);
+        continue;
+      }
+      console.log(`[FALLBACK] Round ${openRound.roundId} no Polymarket resolution after ${minutesSinceEnd.toFixed(1)}m, using BTC price`);
       direction = btcPrice > prevPrice ? "UP" : btcPrice < prevPrice ? "DOWN" : null;
     }
     
