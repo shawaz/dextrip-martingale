@@ -52,6 +52,7 @@ const streakAgents = [
   { id: "PREVIOUS_3_5M", name: "Previous 3", direction: "OPPOSITE", streak: 3 },
   { id: "PREVIOUS_5_5M", name: "Previous 5", direction: "OPPOSITE", streak: 5 },
   { id: "RSI_5M", name: "RSI", direction: "RSI", trigger: "rsi" },
+  { id: "EMA_5M", name: "EMA", direction: "EMA", trigger: "ema" },
 ]
 
 async function seedAgents() {
@@ -369,7 +370,16 @@ export async function GET(req: Request) {
       let status = state.status
 
       const streakSignal = (streak as any).streak ? getStreakSignal((streak as any).streak) : null
-      const direction = streakSignal ?? streak.direction
+      const direction = streakSignal ?? (streak.trigger === "ema"
+        ? (marketState?.emaSlope === 1 ? "UP" : marketState?.emaSlope === -1 ? "DOWN" : null)
+        : streak.direction)
+
+      const triggerActive =
+        streak.trigger === "always" ? true :
+        streakSignal != null ? true :
+        streak.trigger === "rsi" ? (rsi != null && (rsi <= 30 || rsi >= 80)) :
+        streak.trigger === "ema" ? (marketState?.emaSlope === 1 || marketState?.emaSlope === -1) :
+        false
 
       if (pendingTrade) {
         const pendingStake = Number(pendingTrade.stake)
@@ -385,6 +395,16 @@ export async function GET(req: Request) {
           ? agentLadder.slice(0, pendingStep).reduce((sum, value) => sum + value, 0)
           : state.investedOpen
         status = "active"
+      } else {
+        // No pending trade — apply skipped streak advancement for display only when trigger is active
+        if (triggerActive) {
+          const skippedStreak = agentSettings[`skipped_streak_${streak.id}`] ?? 0
+          if (skippedStreak > 0) {
+            const effectiveStep = Math.min(currentStep + skippedStreak, agentLadder.length)
+            currentStep = effectiveStep
+            previousStep = effectiveStep > 1 ? effectiveStep - 1 : 0
+          }
+        }
       }
 
       const livePendingStake = liveAgentTrades.filter((trade) => trade.result === "pending").reduce((sum, trade) => sum + Number(trade.stake ?? 0), 0)
@@ -392,11 +412,6 @@ export async function GET(req: Request) {
       const liveRealizedLoss = liveAgentTrades.reduce((sum, trade) => sum + Math.abs(Math.min(0, Number(trade.pnl ?? 0))), 0)
       const balance = state.realizedProfit - state.realizedLoss
       const realBalance = agentRealPnLs.find(r => r.agentId === streak.id)?.total ?? 0
-
-      const triggerActive =
-        streak.trigger === "always" ? true :
-        streakSignal != null ? true :
-        streak.trigger === "rsi" ? (rsi != null && (rsi <= 30 || rsi >= 80)) : false
 
       const isLive = agent?.isLive ?? false
 

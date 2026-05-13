@@ -14,6 +14,8 @@ const STREAK_AGENTS = [
   { id: "PREVIOUS_5M", name: "Previous", streak: 2 },
   { id: "PREVIOUS_3_5M", name: "Previous 3", streak: 3 },
   { id: "PREVIOUS_5_5M", name: "Previous 5", streak: 5 },
+  // EMA momentum agent that follows the 21-period EMA slope
+  { id: "EMA_5M", name: "EMA", trigger: "ema" as const },
   // Single RSI agent that picks direction based on RSI
   { id: "RSI_5M", name: "RSI", trigger: "rsi" as const },
 ];
@@ -41,6 +43,17 @@ async function getLadderSteps() {
 
 async function getTrendStrengthThreshold() {
   return getSetting("trend_strength_threshold", 8);
+}
+
+async function getSkippedStreak(agentId: string): Promise<number> {
+  const val = await getSetting(`skipped_streak_${agentId}`, 0);
+  return val;
+}
+
+async function setSkippedStreak(agentId: string, value: number) {
+  const now = new Date().toISOString();
+  await db().insert(settings).values({ key: `skipped_streak_${agentId}`, value: String(value), updatedAt: now })
+    .onConflictDoUpdate({ target: settings.key, set: { value: String(value), updatedAt: now } });
 }
 
 async function fetchKlineClosePrices(): Promise<{ spot: number; closes: Map<number, number> }> {
@@ -222,6 +235,8 @@ async function runCycle() {
     console.log(`[RESOLVE] Round ${openRound.roundId} closed | direction:${direction} | src:${resolutionSource} | entry:$${prevPrice.toFixed(2)} | exit:$${btcPrice.toFixed(2)}`);
   }
   
+  let marketState: MarketState | null = null;
+
   if (isNewWindow) {
     lastProcessedWindow = windowTs;
 
@@ -283,7 +298,6 @@ async function runCycle() {
       14
     );
     
-    let marketState: MarketState | null = null;
     try {
       marketState = await buildMarketState(btcPrice);
     } catch (e) {
@@ -300,26 +314,12 @@ async function runCycle() {
       } else if (streak.trigger === "rsi") {
         if (rsi != null && rsi <= 30) signal = "UP";
         else if (rsi != null && rsi >= 80) signal = "DOWN";
+      } else if (streak.trigger === "ema") {
+        if (marketState?.emaSlope === 1) signal = "UP";
+        else if (marketState?.emaSlope === -1) signal = "DOWN";
       }
       
       if (!signal) continue;
-
-      // Polymarket share price gate: only trade if price < $0.50
-      const parts = roundId.split("-");
-      const ts = parts[parts.length - 1];
-      const pmSlug = ts ? `btc-updown-5m-${ts}` : null;
-      let pmPrice: number | null = null;
-      if (pmSlug) {
-        pmPrice = await fetchPolymarketSharePrice(pmSlug, signal as "UP" | "DOWN");
-        if (pmPrice == null) {
-          console.log(`[SKIP] ${streak.id} PM price unavailable for ${signal}`);
-          continue;
-        }
-        if (pmPrice >= 0.50) {
-          console.log(`[SKIP] ${streak.id} PM price $${pmPrice.toFixed(2)} >= $0.50 for ${signal}`);
-          continue;
-        }
-      }
 
       // Per-agent settings override globals
       const agentTarget = perAgentVal(streak.id, "target", targetProfit);
@@ -341,10 +341,37 @@ async function runCycle() {
         console.log(`[DEDUP] ${streak.id} trade already exists for ${roundId}, skipping duplicate`);
         continue;
       }
-      
-      const nextStep = Math.max(0, state.currentStep);
-      const stake = agentLadder[nextStep] || agentLadder[0];
-      
+
+      // Polymarket share price gate: only trade if price < $0.50
+      const parts = roundId.split("-");
+      const ts = parts[parts.length - 1];
+      const pmSlug = ts ? `btc-updown-5m-${ts}` : null;
+      let pmPrice: number | null = null;
+      if (pmSlug) {
+        pmPrice = await fetchPolymarketSharePrice(pmSlug, signal as "UP" | "DOWN");
+      }
+
+      // Load and apply skipped streak counter for step advancement
+      const skippedStreak = await getSkippedStreak(streak.id);
+      const effectiveStep = Math.min(state.currentStep + skippedStreak, agentLadder.length - 1);
+      const effectiveStepIdx = Math.max(0, effectiveStep);
+      const stake = agentLadder[effectiveStepIdx] || agentLadder[0];
+
+      if (pmPrice == null || pmPrice >= 0.50) {
+        // Price unavailable or too expensive — increment skipped counter to advance ladder for next window
+        // Only advance mid-cycle (after at least one loss), not after a win
+        if (state.currentStep > 0) {
+          await setSkippedStreak(streak.id, skippedStreak + 1);
+          console.log(`[SKIP] ${streak.id} ${pmPrice == null ? "PM price unavailable" : `PM price $${pmPrice.toFixed(2)} >= $0.50`} for ${signal} — skipped streak now ${skippedStreak + 1}`);
+        } else {
+          console.log(`[SKIP] ${streak.id} ${pmPrice == null ? "PM price unavailable" : `PM price $${pmPrice.toFixed(2)} >= $0.50`} for ${signal} — no advance (currentStep=0, post-win)`);
+        }
+        continue;
+      }
+
+      // Price is good — reset skipped counter and create trade
+      await setSkippedStreak(streak.id, 0);
+
       await db().insert(trades).values({
         id: crypto.randomUUID(),
         agentId: streak.id,
@@ -361,10 +388,11 @@ async function runCycle() {
         updatedAt: new Date().toISOString(),
       });
       
-      console.log(`[TRADE] ${streak.id} | signal:${signal} | stake:$${stake} | step:${nextStep + 1}/${agentLadder.length} | RSI:${rsi?.toFixed(1) || "N/A"} | PM:$${pmPrice != null ? pmPrice.toFixed(2) : "N/A"}`);
+      const displayStep = effectiveStepIdx + 1;
+      console.log(`[TRADE] ${streak.id} | signal:${signal} | stake:$${stake} | step:${displayStep}/${agentLadder.length} | RSI:${rsi?.toFixed(1) || "N/A"} | PM:$${pmPrice.toFixed(2)}`);
 
       // Telegram alert for created trade
-      await sendTradeAlert("created", streak.id, roundId, signal, stake, nextStep + 1, agentLadder.length, undefined, undefined, pmPrice);
+      await sendTradeAlert("created", streak.id, roundId, signal, stake, displayStep, agentLadder.length, undefined, undefined, pmPrice);
     }
 
     const trendLabel = marketState ? `${marketState.trendDirection}(${marketState.trendStrength.toFixed(1)})` : "N/A";
@@ -408,6 +436,9 @@ async function runCycle() {
       } else if (streak.trigger === "rsi") {
         if (rsi != null && rsi <= 30) signal = "UP";
         else if (rsi != null && rsi >= 80) signal = "DOWN";
+      } else if (streak.trigger === "ema") {
+        if (marketState?.emaSlope === 1) signal = "UP";
+        else if (marketState?.emaSlope === -1) signal = "DOWN";
       }
       if (!signal) continue;
 
@@ -441,8 +472,15 @@ async function runCycle() {
       
       const { currentStep, pending } = await getAgentState(streak.id, agentLadder, agentTarget);
       if (pending) continue;
-      const nextStep = Math.max(0, currentStep);
+
+      // Apply skipped streak advancement (subtract 1 for this window's pending skip)
+      const skippedStreak = await getSkippedStreak(streak.id);
+      const retryEffectiveStep = Math.min(currentStep + Math.max(0, skippedStreak - 1), agentLadder.length - 1);
+      const nextStep = Math.max(0, retryEffectiveStep);
       const stake = agentLadder[nextStep] || agentLadder[0];
+
+      // Reset skipped streak counter since we're trading
+      await setSkippedStreak(streak.id, 0);
 
       await db().insert(trades).values({
         id: crypto.randomUUID(),
